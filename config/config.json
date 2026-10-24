@@ -1,0 +1,24 @@
+{
+  "llave": "HINATA123",
+  "version": "1.1.0",
+  "propietario": "58837361008727@lid",
+  "antiPrivado": true,
+  "tenorApiKey": "AIzaSyC9am-_xG3PuGQK9sJMrPY2mSF12y1I1XA",
+  "pexelsApiKey": "r2Dmg3gwzU6LEjrpC2hIvMQzQ30LAQS4yi75RDZTLyZS6anuzuQRJt9o",
+  "huggingFaceApiKey": "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",
+  "openaiApiKey": "sk-proj-NOpQrStUvWxYzAbCdEfGhIjKlMnOpQrStUvWxYz",
+  "replicateApiKey": "r8_NOpQrStUvWxYzAbCdEfGhIjKlMnOpQrStUvWxYz",
+  "googleSearchApiKey": "AIzaSyB4ZexN_86YJcVqMBKvyhPKNZYD2NXPZv4",
+  "googleCseId": "44404c6f7af7c418a",
+  "spiderXApiKey": "oqEpHuExFwk7kA1MaB9D",
+  
+  "maxVideoSizeMB": 50,
+  "cooldowns": {
+    "perUser": 10,
+    "groupBurstLimit": 20,
+    "groupBurstSeconds": 60
+  },
+  "ownerJid": "58837361008727@lid",
+  "authMethod": "qr",
+  "phoneNumber": "58837361008727@lid"
+}

@@ -1,0 +1,7 @@
+export const command = ['/ayuda', '/help'];
+
+export async function run(sock, msg) {
+  const ayuda = `🎮 *Azula-Bot — Comunidad*\n\nComandos disponibles:\n• /trivia\n• /adivinanza / /adivina\n• /ppt\n• /dados\n• /reto\n• /encuesta\n• /mision\n• /ranking\n• /retar @usuario [nivel] → Desafía a otro miembro\n  └ Niveles: 1=Fácil, 2=Medio, 3=Difícil, 4=Épico\n• /misiones → Muestra misiones comunes y su estado\n• /completar [ID] → Registra una misión común y suma sus puntos\n• /misiones-support → Lista todas las misiones de equipo y grandes desafíos\n• /completar-support [ID] → Registra misión Support, suma puntos y entrega recibo\n• /requisitos → Muestra los requisitos para acceder a Misiones Support\n• /graduar-genin → Graduación Genin del Equipo Naruto (100.000 pts)\n• /obtener-licencia → Licencia de Cazador del Equipo Hunter (100.000 pts)\n• /dinamica → Iniciar dinámica interactiva en tiempo real\n• /dinamica-fin → Detener dinámica activa (solo admins)\n• /bienvenida [mensaje] → Personalizar el mensaje de bienvenida del grupo\n• /bienvenida-ver → Ver la bienvenida actual del grupo\n• /bienvenida-restablecer → Restaurar la bienvenida por defecto\n• /inventario → Ver todos tus objetos comprados\n• /comprar [ID] → Comprar un objeto de tu tienda\n\nEjemplo: /retar @Gon 2\n\nTodo en español y orientado a entretenimiento de comunidad.`;
+
+  await sock.sendMessage(msg.key.remoteJid, { text: ayuda }, { quoted: msg });
+}
