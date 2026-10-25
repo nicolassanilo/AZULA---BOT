@@ -4,7 +4,10 @@ import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const RUTA_IMAGEN = path.join(__dirname, '../../assets/menu-bot.jpg');
+const RUTAS_IMAGEN = [
+  path.resolve(__dirname, '../../Imagenes/menu.jpg'),
+  path.resolve(__dirname, '../../Imagenes/menu.png')
+];
 
 // ACTUALIZADO: 2026-09-10 — Dinámicas: 4 tipos en carpeta
 
@@ -144,16 +147,19 @@ export function activarMenu(sock, obtenerPlugins = () => new Map()) {
       const grupoId = msg.key.remoteJid;
       const menu = crearMenuPrincipal(obtenerPlugins());
 
-      if (fs.existsSync(RUTA_IMAGEN)) {
+      const rutaImagen = RUTAS_IMAGEN.find((ruta) => fs.existsSync(ruta));
+      if (rutaImagen) {
+        if (menu.length > 1024) {
+          console.warn(`⚠️ El caption del menú tiene ${menu.length} caracteres y puede superar el límite de WhatsApp.`);
+        }
         await sock.sendMessage(grupoId, {
-          image: { url: RUTA_IMAGEN }
+          image: fs.readFileSync(rutaImagen),
+          caption: menu
         }, { quoted: msg });
-        await sock.sendMessage(grupoId, { text: menu }, { quoted: msg });
-        console.log('📋 Menú enviado como imagen y texto separado para conservar el formato completo');
+        console.log(`📋 Menú enviado en un solo mensaje con imagen: ${rutaImagen}`);
       } else {
         await sock.sendMessage(grupoId, { text: menu }, { quoted: msg });
-        console.log('📋 Menú enviado solo con texto porque no se encontró la imagen en assets/menu-bot.jpg');
-        console.log(`   💡 Ruta esperada: ${RUTA_IMAGEN}`);
+        console.log('📋 No se encontró Imagenes/menu.jpg ni Imagenes/menu.png; se envió solo el texto del menú.');
       }
     } catch (error) {
       console.error('❌ Error al enviar el menú principal:', error);
