@@ -311,12 +311,19 @@ async function connectToWhatsApp() {
             config.authMethod = 'qr';
         }
 
+        const phoneNumber = String(config.phoneNumber || '').replace(/\D/g, '');
+        if (config.authMethod === 'phone' && !/^549\d{8,10}$/.test(phoneNumber)) {
+            console.error('❌ Número de emparejamiento inválido. En config/config.json, configura phoneNumber con el formato argentino 549 + número, solo dígitos (sin +, espacios ni @lid).');
+            return null;
+        }
+
         const sock = makeWASocket({
             version,
             auth: {
                 creds: state.creds,
                 keys: makeCacheableSignalKeyStore(state.keys, pino({ level: 'silent' }))
             },
+            printQRInTerminal: false,
             logger: pino({ level: 'silent' }),
             shouldIgnoreJid: (jid) => jid.includes('@broadcast'),
             getMessage: async () => ({ conversation: 'hello' })
@@ -330,21 +337,6 @@ async function connectToWhatsApp() {
         activarPerfiles(sock);
         activarMenu(sock);
         activarTiendas(sock);
-
-        if (config.authMethod === 'phone') {
-            if (!config.phoneNumber) {
-                console.warn('⚠️ phoneNumber no configurado, usando QR por defecto.');
-                config.authMethod = 'qr';
-            } else {
-                try {
-                    const code = await sock.requestPairingCode(config.phoneNumber.replace('+', ''));
-                    console.log(`🔗 Código de vinculación: ${code}`);
-                    console.log('Ingresa este código en WhatsApp para vincular el bot.');
-                } catch (error) {
-                    console.warn('⚠️ No se pudo solicitar el código de vinculación:', error?.message || error);
-                }
-            }
-        }
 
         sock.ev.on('connection.update', (update) => {
             const { connection, lastDisconnect } = update;
@@ -381,13 +373,28 @@ async function connectToWhatsApp() {
             } else if (connection === 'open') {
                 reconnectCount = 0;
                 console.log('✅ Conectado a WhatsApp');
+                if (config.authMethod === 'phone') {
+                    console.log('✅ Sesión vinculada y conexión lista.');
+                }
                 if (currentQR) {
                     currentQR = null;
                 }
             }
         });
 
-        sock.ev.on('creds.update', saveCreds);
+        let credencialesGuardadas = false;
+        sock.ev.on('creds.update', async () => {
+            try {
+                await saveCreds();
+                if (!credencialesGuardadas) {
+                    console.log('✅ Credenciales de WhatsApp guardadas.');
+                    credencialesGuardadas = true;
+                }
+            } catch (error) {
+                console.error('❌ No se pudieron guardar las credenciales de WhatsApp:', error?.message || error);
+            }
+        });
+        console.log('🔐 Esperando actualizaciones de credenciales de WhatsApp.');
 
         sock.ev.on('messages.upsert', async (m) => {
             if (m.type !== 'notify' || !m.messages?.[0]?.key) return;
@@ -526,6 +533,23 @@ async function connectToWhatsApp() {
                 await sock.sendMessage(msg.key.remoteJid, { text: '⚠️ Ocurrió un error inesperado al ejecutar ese comando.' }, { quoted: msg });
             }
         });
+
+        if (config.authMethod === 'phone' && !state.creds.registered) {
+            // Request pairing only after connection and credential listeners are attached.
+            console.log(`📱 Solicitando código de emparejamiento para el número terminado en ${phoneNumber.slice(-4)}...`);
+            void (async () => {
+                try {
+                    await new Promise((resolve) => setTimeout(resolve, 3000));
+                    const code = await sock.requestPairingCode(phoneNumber);
+                    console.log(`🔗 Código de vinculación: ${code}`);
+                    console.log('📲 En WhatsApp: Configuración → Dispositivos vinculados → Vincular con número en lugar de escanear QR.');
+                } catch (error) {
+                    console.error('❌ No se pudo solicitar el código de emparejamiento:', error?.message || error);
+                }
+            })();
+        } else if (config.authMethod === 'phone') {
+            console.log('🔐 Ya existe una sesión registrada; se intentará reconectar sin pedir otro código.');
+        }
 
         console.log('✅ Comandos cargados correctamente');
         console.log('✅ Conectado a WhatsApp');
