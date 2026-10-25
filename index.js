@@ -180,14 +180,24 @@ export async function cargarPlugins() {
 
     const pluginRoots = [
         path.join(__dirname, 'plugins'),
+        path.join(__dirname, 'Plugins'),
         path.join(__dirname, 'src', 'plugins'),
         path.join(__dirname, 'comunidad')
     ];
 
     try {
-        const pluginFiles = [...new Set((await Promise.all(
+        const discoveredPluginFiles = (await Promise.all(
             pluginRoots.map(root => collectPluginFiles(root, []))
-        )).flat())];
+        )).flat();
+        const canonicalFiles = await Promise.all(discoveredPluginFiles.map(async (file) => {
+            try {
+                return [await fs.realpath(file), file];
+            } catch (error) {
+                console.warn(`⚠️ No se pudo normalizar la ruta del plugin "${file}":`, error?.message || error);
+                return [path.resolve(file), file];
+            }
+        }));
+        const pluginFiles = [...new Map(canonicalFiles).values()];
 
         console.log('🔌 Cargando plugins...');
         for (const pluginFilePath of pluginFiles) {
@@ -196,31 +206,44 @@ export async function cargarPlugins() {
                 const pluginPath = `${pathToFileURL(pluginFilePath).href}?v=${Date.now()}`;
                 const imported = await import(pluginPath);
                 const pluginDefinition = imported.default || imported;
-                const commands = pluginDefinition.command || pluginDefinition.commands || imported.command || imported.commands;
+                const pluginName = pluginDefinition.nombre || file;
+                if (pluginDefinition.activo === false) {
+                    console.log(`⏸️ Plugin inactivo: ${pluginName}`);
+                    continue;
+                }
+
+                const commands = pluginDefinition.command || pluginDefinition.commands || pluginDefinition.comandos ||
+                    imported.command || imported.commands || imported.comandos;
                 const aliases = pluginDefinition.alias || pluginDefinition.aliases || imported.alias || imported.aliases;
 
                 if (!commands) {
-                    console.log(`⚠️ Plugin omitido: "${file}" no exporta un comando compatible.`);
+                    console.log(`⚠️ Plugin omitido: "${file}" no exporta comandos compatibles.`);
                     continue;
                 }
 
                 const pluginObj = typeof pluginDefinition === 'function'
                     ? { ...pluginDefinition, run: pluginDefinition, command: pluginDefinition.command }
-                    : { ...pluginDefinition, run: pluginDefinition.run || pluginDefinition };
+                    : { ...pluginDefinition, run: pluginDefinition.run || pluginDefinition.ejecutar || pluginDefinition };
 
                 if (typeof pluginObj.run !== 'function') {
-                    console.log(`⚠️ Plugin omitido: "${file}" no tiene una función de ejecución válida.`);
+                    console.log(`⚠️ Plugin omitido: "${file}" no tiene una función run o ejecutar válida.`);
                     continue;
+                }
+
+                if (typeof pluginObj.inicializar === 'function') {
+                    await pluginObj.inicializar();
                 }
 
                 const commandList = [
                   ...(Array.isArray(commands) ? commands : [commands]),
                   ...(aliases ? (Array.isArray(aliases) ? aliases : [aliases]) : [])
                 ];
+                let registeredCommands = 0;
 
                 for (const cmd of commandList) {
                     if (cmd instanceof RegExp) {
                         newRegexPlugins.push({ pattern: cmd, plugin: pluginObj, file });
+                        registeredCommands += 1;
                         continue;
                     }
 
@@ -236,6 +259,13 @@ export async function cargarPlugins() {
                     }
 
                     newPlugins.set(commandKey, pluginObj);
+                    registeredCommands += 1;
+                }
+
+                if (registeredCommands > 0) {
+                    console.log(`✅ Plugin cargado: ${pluginName}`);
+                } else {
+                    console.warn(`⚠️ Plugin omitido: "${pluginName}" no registró ningún comando.`);
                 }
             } catch (err) {
                 console.error(`❌ Error al cargar el plugin "${pluginFilePath}":`, err);
@@ -335,7 +365,7 @@ async function connectToWhatsApp() {
         activarMisiones(sock);
         activarRanking(sock);
         activarPerfiles(sock);
-        activarMenu(sock);
+        activarMenu(sock, () => plugins);
         activarTiendas(sock);
 
         sock.ev.on('connection.update', (update) => {

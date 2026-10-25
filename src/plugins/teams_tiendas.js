@@ -55,24 +55,24 @@ function validarId(id) {
 
 async function prepararTablas() {
   if (!tablasPreparadas) {
-    tablasPreparadas = Promise.all([
-      db.run(`CREATE TABLE IF NOT EXISTS teams (
+    tablasPreparadas = (async () => {
+      await db.run(`CREATE TABLE IF NOT EXISTS teams (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         nombre TEXT NOT NULL,
         descripcion TEXT NOT NULL,
         ubicacion TEXT,
         propietario TEXT NOT NULL,
         estado TEXT NOT NULL DEFAULT 'activo'
-      )`),
-      db.run(`CREATE TABLE IF NOT EXISTS tiendas (
+      )`);
+      await db.run(`CREATE TABLE IF NOT EXISTS tiendas (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         nombre TEXT NOT NULL,
         descripcion TEXT,
         ubicacion TEXT NOT NULL,
         propietario TEXT NOT NULL,
         estado TEXT NOT NULL DEFAULT 'activo'
-      )`)
-    ]).catch((error) => {
+      )`);
+    })().catch((error) => {
       tablasPreparadas = null;
       throw error;
     });
@@ -215,12 +215,13 @@ async function ejecutar(sock, msg, context = {}) {
 }
 
 const plugin = {
-  nombre: 'teams_tiendas',
-  descripcion: 'Administración de equipos y tiendas personalizables.',
+  nombre: 'Teams y Tiendas',
+  descripcion: 'Administra equipos y tiendas: agregar, listar, editar o eliminar; /teams_tiendas estado muestra los totales.',
   comandos: COMANDOS,
   command: COMANDOS,
   commands: COMANDOS,
   activo: true,
+  inicializar: prepararTablas,
   ejecutar,
   run: ejecutar
 };

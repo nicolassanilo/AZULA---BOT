@@ -76,12 +76,33 @@ export const MENU_PRINCIPAL = `
 ╰─────────────────────────────────────────────
 `;
 
+function crearMenuPrincipal(plugins) {
+  const pluginsConMenu = [...new Set(plugins.values())]
+    .filter((plugin) => plugin?.nombre && plugin?.descripcion)
+    .map((plugin) => {
+      const comandos = plugin.comandos || plugin.command || plugin.commands || [];
+      const comandosSlash = (Array.isArray(comandos) ? comandos : [comandos])
+        .filter((comando) => typeof comando === 'string' && comando.startsWith('/'));
+
+      return comandosSlash.length
+        ? `• ${plugin.nombre}: ${comandosSlash.join(', ')} → ${plugin.descripcion}`
+        : null;
+    })
+    .filter(Boolean);
+
+  if (!pluginsConMenu.length) {
+    return MENU_PRINCIPAL;
+  }
+
+  return `${MENU_PRINCIPAL}\n\n🧩 𝐏𝐋𝐔𝐆𝐈𝐍𝐒 𝐃𝐈𝐒𝐏𝐎𝐍𝐈𝐁𝐋𝐄𝐒\n──────────────────────────────────────────────\n${pluginsConMenu.join('\n')}\n`;
+}
+
 /**
  * Activa los comandos /menu y /ayuda.
  * Si existe la imagen local, la envía junto con el texto.
  * Si no existe, envía solo texto para no romper el bot.
  */
-export function activarMenu(sock) {
+export function activarMenu(sock, obtenerPlugins = () => new Map()) {
   if (!sock || typeof sock.ev?.on !== 'function') {
     console.error('❌ No se pudo activar el menú: sock inválido');
     return;
@@ -98,17 +119,18 @@ export function activarMenu(sock) {
       if (textoNormalizado !== '/menu' && textoNormalizado !== '/ayuda') return;
 
       const grupoId = msg.key.remoteJid;
+      const menu = crearMenuPrincipal(obtenerPlugins());
 
       if (fs.existsSync(RUTA_IMAGEN)) {
         await sock.sendMessage(grupoId, {
           image: { url: RUTA_IMAGEN },
-          caption: MENU_PRINCIPAL
+          caption: menu
         });
         console.log('📋 Menú enviado con imagen desde assets/menu-bot.jpg');
         return;
       }
 
-      await sock.sendMessage(grupoId, { text: MENU_PRINCIPAL }, { quoted: msg });
+      await sock.sendMessage(grupoId, { text: menu }, { quoted: msg });
       console.log('📋 Menú enviado solo con texto porque no se encontró la imagen en assets/menu-bot.jpg');
       console.log(`   💡 Ruta esperada: ${RUTA_IMAGEN}`);
     } catch (error) {
