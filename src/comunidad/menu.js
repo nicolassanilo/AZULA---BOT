@@ -9,23 +9,39 @@ const RUTA_IMAGEN = path.join(__dirname, '../../assets/menu-bot.jpg');
 // ACTUALIZADO: 2026-09-10 — Dinámicas: 4 tipos en carpeta
 
 export const MENU_PRINCIPAL = `
-🥷📋 𝐌𝐄𝐍𝐔 𝐏𝐑𝐈𝐍𝐂𝐈𝐏𝐀𝐋 · COMUNIDAD ANIME 🎮
+🥷📋 𝐌𝐄𝐍𝐔 𝐏𝐑𝐈𝐍𝐂𝐈𝐏𝐀𝐋 · 𝓐𝔃𝓾𝓵𝓪 𝓑𝓸𝓽 🎮
 ╭─────────────────────────────────────────────╮
 ╰─────────────────────────────────────────────╯
 
-👤 𝐓𝐔 𝐏𝐄𝐑𝐅𝐈𝐋
+👤 𝐏𝐄𝐑𝐅𝐈𝐋 & 𝐏𝐔𝐍𝐓𝐎𝐒
 ──────────────────────────────────────────────
 /perfil          → Ver tu ficha completa
-/puntos ver [team_id] → Ver puntos del Team (Admins: agregar/restar)
 /equipo          → Ver datos de tu equipo
+/puntos          → Consultar tus puntos disponibles
+/puntos ver [team_id] → Ver puntos del Team
 /inventario      → Ver todos tus objetos comprados
 
-🏪 𝐓𝐈𝐄𝐍𝐃𝐀𝐒 𝐃𝐄 𝐄𝐐𝐔𝐈𝐏𝐎
+👥🏪 𝐓𝐄𝐀𝐌𝐒 & 𝐓𝐈𝐄𝐍𝐃𝐀𝐒
 ──────────────────────────────────────────────
+👥 Teams del grupo
+/teams crear [nombre + emoji] → Crear un Team (solo admins)
+/teams agregar [nombre + emoji] → Alias compatible para crear
+/teams lista       → Ver Teams y puntos actuales
+/teams editar [id] [nuevo nombre + emoji] → Editar un Team
+/teams eliminar [id] → Eliminar un Team sin movimientos de puntos
+
+🏪 Tiendas de equipo
 🩸 /tienda jujutsu → Tienda del Hechicero
 🍥 /tienda naruto  → Tienda del Shinobi
 🔰 /tienda hunter  → Tienda del Cazador
 /comprar [ID]    → Adquirir objeto de tu tienda
+/tiendas agregar [nombre + emoji] → Crear tienda
+/tiendas lista   → Ver tiendas del grupo
+/tiendas editar [id] [nuevo nombre + emoji] → Editar tienda
+/tiendas eliminar [id] → Eliminar tienda
+/teams_tiendas estado → Ver estado de Teams y Tiendas
+/puntos agregar [team_id] [cantidad] [motivo] → Sumar puntos (solo admins)
+/puntos restar [team_id] [cantidad] [motivo] → Restar puntos (solo admins)
 
 📋 𝐌𝐈𝐒𝐈𝐎𝐍𝐄𝐒 𝐘 𝐑𝐄𝐂𝐎𝐌𝐏𝐄𝐍𝐒𝐀𝐒
 ──────────────────────────────────────────────
@@ -61,20 +77,22 @@ export const MENU_PRINCIPAL = `
 /rechazar        → Rechazar un desafío
 /clasificacion   → Ver ranking general de puntos
 
-� 𝐁𝐈𝐄𝐍𝐕𝐄𝐍𝐈𝐃𝐀 𝐏𝐄𝐑𝐒𝐎𝐍𝐀𝐋𝐈𝐙𝐀𝐃𝐀
+👋 𝐁𝐈𝐄𝐍𝐕𝐄𝐍𝐈𝐃𝐀 𝐏𝐄𝐑𝐒𝐎𝐍𝐀𝐋𝐈𝐙𝐀𝐃𝐀
 ──────────────────────────────────────────────
 /bienvenida [mensaje] → Configurar el mensaje de bienvenida del grupo
 /bienvenida-ver      → Ver el mensaje actual del grupo
 /bienvenida-restablecer → Volver al mensaje por defecto
 
-�📋 𝐀𝐘𝐔𝐃𝐀
+📋 𝐀𝐘𝐔𝐃𝐀
 ──────────────────────────────────────────────
 /ayuda           → Explicación detallada de todos los comandos
 
-╭─────────────────────────────────────────────╯
- 💡 ¡Elige una opción y disfruta de la comunidad! ✨
-╰─────────────────────────────────────────────
+{{PLUGINS_DISPONIBLES}}
 `;
+
+const PIE_MENU = `╭─────────────────────────────────────────────╯
+ 💡 ¡Elige una opción y disfruta de la comunidad! ✨
+╰─────────────────────────────────────────────`;
 
 function crearMenuPrincipal(plugins) {
   const pluginsConMenu = [...new Set(plugins.values())]
@@ -90,11 +108,16 @@ function crearMenuPrincipal(plugins) {
     })
     .filter(Boolean);
 
-  if (!pluginsConMenu.length) {
-    return MENU_PRINCIPAL;
-  }
+  const listadoPlugins = pluginsConMenu.length
+    ? pluginsConMenu.join('\n')
+    : '• No hay plugins de comandos cargados.';
+  const bloquePlugins = `🧩 𝐏𝐋𝐔𝐆𝐈𝐍𝐒 𝐃𝐈𝐒𝐏𝐎𝐍𝐈𝐁𝐋𝐄𝐒
+──────────────────────────────────────────────
+${listadoPlugins}`;
 
-  return `${MENU_PRINCIPAL}\n\n🧩 𝐏𝐋𝐔𝐆𝐈𝐍𝐒 𝐃𝐈𝐒𝐏𝐎𝐍𝐈𝐁𝐋𝐄𝐒\n──────────────────────────────────────────────\n${pluginsConMenu.join('\n')}\n`;
+  return `${MENU_PRINCIPAL.replace('{{PLUGINS_DISPONIBLES}}', bloquePlugins).trimEnd()}
+
+${PIE_MENU}`;
 }
 
 /**
@@ -123,16 +146,15 @@ export function activarMenu(sock, obtenerPlugins = () => new Map()) {
 
       if (fs.existsSync(RUTA_IMAGEN)) {
         await sock.sendMessage(grupoId, {
-          image: { url: RUTA_IMAGEN },
-          caption: menu
-        });
-        console.log('📋 Menú enviado con imagen desde assets/menu-bot.jpg');
-        return;
+          image: { url: RUTA_IMAGEN }
+        }, { quoted: msg });
+        await sock.sendMessage(grupoId, { text: menu }, { quoted: msg });
+        console.log('📋 Menú enviado como imagen y texto separado para conservar el formato completo');
+      } else {
+        await sock.sendMessage(grupoId, { text: menu }, { quoted: msg });
+        console.log('📋 Menú enviado solo con texto porque no se encontró la imagen en assets/menu-bot.jpg');
+        console.log(`   💡 Ruta esperada: ${RUTA_IMAGEN}`);
       }
-
-      await sock.sendMessage(grupoId, { text: menu }, { quoted: msg });
-      console.log('📋 Menú enviado solo con texto porque no se encontró la imagen en assets/menu-bot.jpg');
-      console.log(`   💡 Ruta esperada: ${RUTA_IMAGEN}`);
     } catch (error) {
       console.error('❌ Error al enviar el menú principal:', error);
     }
