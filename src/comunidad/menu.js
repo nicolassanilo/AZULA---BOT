@@ -150,7 +150,9 @@ export function activarMenu(sock, obtenerPlugins = () => new Map()) {
       const grupoId = msg.key.remoteJid;
       const menu = crearMenuPrincipal(obtenerPlugins());
 
-      const imagenesDisponibles = RUTAS_IMAGEN.filter((ruta) => fs.existsSync(ruta));
+      const imagenesDisponibles = RUTAS_IMAGEN
+        .map((ruta) => [ruta, ruta.replace(/\.jpg$/i, '.png')].find((candidata) => fs.existsSync(candidata)))
+        .filter(Boolean);
       if (imagenesDisponibles.length > 0) {
         const rutaImagen = imagenesDisponibles[Math.floor(Math.random() * imagenesDisponibles.length)];
         if (menu.length > 1024) {
@@ -163,7 +165,7 @@ export function activarMenu(sock, obtenerPlugins = () => new Map()) {
         console.log(`📋 Menú enviado en un solo mensaje con imagen: ${rutaImagen}`);
       } else {
         await sock.sendMessage(grupoId, { text: menu }, { quoted: msg });
-        console.log('📋 No se encontró ninguna imagen menu_01.jpg–menu_05.jpg en Imagenes; se envió solo el texto del menú.');
+        console.log('📋 No se encontraron imágenes menu_01–menu_05 (.jpg/.png) en Imagenes; se envió solo el texto del menú.');
       }
     } catch (error) {
       console.error('❌ Error al enviar el menú principal:', error);
