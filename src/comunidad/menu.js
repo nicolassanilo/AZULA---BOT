@@ -5,8 +5,11 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const RUTAS_IMAGEN = [
-  path.resolve(__dirname, '../../Imagenes/menu.jpg'),
-  path.resolve(__dirname, '../../Imagenes/menu.png')
+  path.resolve(__dirname, '../../Imagenes/menu_01.jpg'),
+  path.resolve(__dirname, '../../Imagenes/menu_02.jpg'),
+  path.resolve(__dirname, '../../Imagenes/menu_03.jpg'),
+  path.resolve(__dirname, '../../Imagenes/menu_04.jpg'),
+  path.resolve(__dirname, '../../Imagenes/menu_05.jpg')
 ];
 
 // ACTUALIZADO: 2026-09-10 — Dinámicas: 4 tipos en carpeta
@@ -125,8 +128,8 @@ ${PIE_MENU}`;
 
 /**
  * Activa los comandos /menu y /ayuda.
- * Si existe la imagen local, la envía junto con el texto.
- * Si no existe, envía solo texto para no romper el bot.
+ * Elige al azar una imagen local disponible y la envía con el menú.
+ * Si no existe ninguna imagen, envía solo el texto.
  */
 export function activarMenu(sock, obtenerPlugins = () => new Map()) {
   if (!sock || typeof sock.ev?.on !== 'function') {
@@ -147,8 +150,9 @@ export function activarMenu(sock, obtenerPlugins = () => new Map()) {
       const grupoId = msg.key.remoteJid;
       const menu = crearMenuPrincipal(obtenerPlugins());
 
-      const rutaImagen = RUTAS_IMAGEN.find((ruta) => fs.existsSync(ruta));
-      if (rutaImagen) {
+      const imagenesDisponibles = RUTAS_IMAGEN.filter((ruta) => fs.existsSync(ruta));
+      if (imagenesDisponibles.length > 0) {
+        const rutaImagen = imagenesDisponibles[Math.floor(Math.random() * imagenesDisponibles.length)];
         if (menu.length > 1024) {
           console.warn(`⚠️ El caption del menú tiene ${menu.length} caracteres y puede superar el límite de WhatsApp.`);
         }
@@ -159,7 +163,7 @@ export function activarMenu(sock, obtenerPlugins = () => new Map()) {
         console.log(`📋 Menú enviado en un solo mensaje con imagen: ${rutaImagen}`);
       } else {
         await sock.sendMessage(grupoId, { text: menu }, { quoted: msg });
-        console.log('📋 No se encontró Imagenes/menu.jpg ni Imagenes/menu.png; se envió solo el texto del menú.');
+        console.log('📋 No se encontró ninguna imagen menu_01.jpg–menu_05.jpg en Imagenes; se envió solo el texto del menú.');
       }
     } catch (error) {
       console.error('❌ Error al enviar el menú principal:', error);
