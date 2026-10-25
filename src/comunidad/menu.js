@@ -16,7 +16,7 @@ export const MENU_PRINCIPAL = `
 👤 𝐓𝐔 𝐏𝐄𝐑𝐅𝐈𝐋
 ──────────────────────────────────────────────
 /perfil          → Ver tu ficha completa
-/puntos          → Consultar tus puntos disponibles
+/puntos ver [team_id] → Ver puntos del Team (Admins: agregar/restar)
 /equipo          → Ver datos de tu equipo
 /inventario      → Ver todos tus objetos comprados
 
