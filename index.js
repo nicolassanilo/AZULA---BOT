@@ -530,7 +530,7 @@ async function connectToWhatsApp() {
 
                 if (isOwner) {
                     console.log(`🔓 Usuario propietario detectado (${userId}), saltando cooldowns para ${command}`);
-                    await plugin.run(sock, msg, { text: args.join(' '), command, args, plugins });
+                    await plugin.run(sock, msg, { text: args.join(' '), command, args, plugins, ownerId });
                     return;
                 }
 
@@ -557,7 +557,7 @@ async function connectToWhatsApp() {
                 cooldownsMap.set(cmdKey, now);
 
                 console.log(`💬 Comando: ${command} | Argumentos: [${args.join(', ')}] | De: ${senderId}`);
-                await plugin.run(sock, msg, { text: args.join(' '), command, args, plugins });
+                await plugin.run(sock, msg, { text: args.join(' '), command, args, plugins, ownerId });
             } catch (err) {
                 console.warn(`⚠️ Error ejecutando el comando "${command}":`, err?.message || err);
                 await sock.sendMessage(msg.key.remoteJid, { text: '⚠️ Ocurrió un error inesperado al ejecutar ese comando.' }, { quoted: msg });

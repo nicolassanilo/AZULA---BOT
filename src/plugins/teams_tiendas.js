@@ -1,20 +1,20 @@
 import { db } from '../../db.js';
 
-const ADMIN_IDS = ['PONER_ID_ADMIN_AQUI'];
-
 const RESPUESTAS = {
-  soloAdmin: '⛔ Solo los administradores configurados pueden usar estos comandos.',
-  ayudaTeams: 'Uso: /teams agregar [nombre] | [descripción]\n/teams lista\n/teams editar [id] [nuevo nombre] | [nueva descripción]\n/teams eliminar [id]',
-  ayudaTiendas: 'Uso: /tiendas agregar [nombre] | [ubicación]\n/tiendas lista\n/tiendas editar [id] [nuevo nombre] | [nueva ubicación]\n/tiendas eliminar [id]',
-  ayudaEdicionTienda: 'Uso: /tiendas editar [id] [nuevo nombre] | [nueva ubicación]',
-  faltanDatos: '⚠️ Faltan datos. Separa el nombre del otro campo con |. Ejemplo: /teams agregar Equipo Azul | Grupo de la comunidad.',
+  soloAdmin: '⛔ Solo un administrador de este grupo o el propietario global del bot puede modificar sus equipos y tiendas.',
+  soloGrupo: '⚠️ Este comando solo está disponible dentro de un grupo de WhatsApp.',
+  noMetadata: '⚠️ No pude leer los administradores del grupo. Verifica que el bot siga dentro del grupo y vuelve a intentarlo.',
+  ayudaTeams: 'Uso: /teams agregar [nombre con emoji]\n/teams lista\n/teams editar [id] [nuevo nombre con emoji]\n/teams eliminar [id]',
+  ayudaTiendas: 'Uso: /tiendas agregar [nombre con emoji]\n/tiendas lista\n/tiendas editar [id] [nuevo nombre con emoji]\n/tiendas eliminar [id]',
+  ayudaEdicion: (tipo) => `Uso: /${tipo} editar [id] [nuevo nombre con emoji]`,
+  faltanDatos: '⚠️ Falta el nombre del equipo o tienda. Ejemplo: /teams agregar Team Demon Slayer 🩸',
   noEncontrado: (tipo, id) => `⚠️ No se encontró ${tipo} con ID ${id}.`,
-  agregado: (tipo, id) => `✅ ${tipo} agregado correctamente. ID: ${id}.`,
+  agregado: (tipo, nombre, id) => `✅ ${tipo} "${nombre}" agregado para este grupo. ID: ${id}.`,
   actualizado: (tipo, id) => `✅ ${tipo} con ID ${id} actualizado correctamente.`,
   eliminado: (tipo, id) => `✅ ${tipo} con ID ${id} eliminado correctamente.`,
   sinRegistros: (tipo) => `📭 Todavía no hay ${tipo} registrados.`,
   error: '⚠️ Ocurrió un error al procesar el comando. Revisa el registro del bot e inténtalo de nuevo.',
-  estado: (equipos, tiendas) => `✅ Plugin Teams y Tiendas activo.\n👥 Equipos: ${equipos}\n🏪 Tiendas: ${tiendas}`
+  estado: (equipos, tiendas) => `✅ Plugin Teams y Tiendas activo en este grupo.\n👥 Equipos: ${equipos}\n🏪 Tiendas: ${tiendas}`
 };
 
 const COMANDOS = ['/teams', '/tiendas', '/teams_tiendas'];
@@ -28,25 +28,40 @@ function obtenerTexto(msg) {
   ).trim();
 }
 
-function esAdmin(remitente) {
-  const permitidos = ADMIN_IDS
-    .map((id) => id.trim())
-    .filter((id) => id && id !== 'PONER_ID_ADMIN_AQUI');
-
-  return permitidos.includes(remitente);
+function normalizarJid(jid) {
+  return String(jid || '').toLowerCase().split(':')[0];
 }
 
-function separarCampos(texto) {
-  const delimitador = texto.indexOf('|');
-  if (delimitador >= 0) {
-    return [
-      texto.slice(0, delimitador).trim(),
-      texto.slice(delimitador + 1).trim()
-    ];
-  }
+function esPropietarioGlobal(ownerId, remitente) {
+  const propietario = normalizarJid(ownerId);
+  const usuario = normalizarJid(remitente);
+  if (!propietario || !usuario) return false;
+  if (propietario.includes('@')) return propietario === usuario;
 
-  const [primerCampo, ...resto] = texto.trim().split(/\s+/);
-  return [primerCampo || '', resto.join(' ').trim()];
+  const numeroPropietario = propietario.replace(/\D/g, '');
+  const numeroUsuario = usuario.split('@')[0].replace(/\D/g, '');
+  return Boolean(numeroPropietario && numeroPropietario === numeroUsuario);
+}
+
+async function detectarAdminGrupo(sock, grupoId, remitente) {
+  try {
+    const metadata = await sock.groupMetadata(grupoId);
+    const participante = metadata?.participants?.find(
+      (entry) => normalizarJid(entry.id || entry.jid) === normalizarJid(remitente)
+    );
+    const esAdmin = Boolean(
+      participante &&
+      (['admin', 'superadmin', 'owner'].includes(participante.admin || '') ||
+        participante.isAdmin ||
+        participante.isSuperAdmin)
+    );
+
+    console.log(`👥 Usuario ${remitente} ${esAdmin ? 'es admin' : 'no es admin'} en grupo ${grupoId}`);
+    return esAdmin;
+  } catch (error) {
+    console.error(`❌ No se pudieron leer los administradores del grupo ${grupoId}:`, error?.message || error);
+    return null;
+  }
 }
 
 function validarId(id) {
@@ -56,22 +71,50 @@ function validarId(id) {
 async function prepararTablas() {
   if (!tablasPreparadas) {
     tablasPreparadas = (async () => {
-      await db.run(`CREATE TABLE IF NOT EXISTS teams (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        nombre TEXT NOT NULL,
-        descripcion TEXT NOT NULL,
-        ubicacion TEXT,
-        propietario TEXT NOT NULL,
-        estado TEXT NOT NULL DEFAULT 'activo'
-      )`);
-      await db.run(`CREATE TABLE IF NOT EXISTS tiendas (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        nombre TEXT NOT NULL,
-        descripcion TEXT,
-        ubicacion TEXT NOT NULL,
-        propietario TEXT NOT NULL,
-        estado TEXT NOT NULL DEFAULT 'activo'
-      )`);
+      const columnasBase = {
+        grupo_id: 'TEXT',
+        propietario_id: 'TEXT',
+        nombre_con_emoji: 'TEXT',
+        nombre: "TEXT NOT NULL DEFAULT ''",
+        descripcion: "TEXT NOT NULL DEFAULT ''",
+        ubicacion: "TEXT NOT NULL DEFAULT ''",
+        propietario: "TEXT NOT NULL DEFAULT ''",
+        estado: "TEXT NOT NULL DEFAULT 'activo'"
+      };
+
+      for (const tabla of ['teams', 'tiendas']) {
+        await db.run(`CREATE TABLE IF NOT EXISTS ${tabla} (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          grupo_id TEXT,
+          propietario_id TEXT,
+          nombre_con_emoji TEXT,
+          nombre TEXT NOT NULL DEFAULT '',
+          descripcion TEXT NOT NULL DEFAULT '',
+          ubicacion TEXT NOT NULL DEFAULT '',
+          propietario TEXT NOT NULL DEFAULT '',
+          estado TEXT NOT NULL DEFAULT 'activo'
+        )`);
+
+        const existentes = await db.all(`PRAGMA table_info(${tabla})`);
+        const nombresExistentes = new Set(existentes.map((columna) => columna.name));
+        for (const [columna, definicion] of Object.entries(columnasBase)) {
+          if (!nombresExistentes.has(columna)) {
+            await db.run(`ALTER TABLE ${tabla} ADD COLUMN ${columna} ${definicion}`);
+          }
+        }
+
+        await db.run(
+          `UPDATE ${tabla}
+           SET nombre_con_emoji = nombre
+           WHERE (nombre_con_emoji IS NULL OR nombre_con_emoji = '') AND nombre <> ''`
+        );
+        await db.run(
+          `UPDATE ${tabla}
+           SET propietario_id = propietario
+           WHERE (propietario_id IS NULL OR propietario_id = '') AND propietario <> ''`
+        );
+        await db.run(`CREATE INDEX IF NOT EXISTS idx_${tabla}_grupo_id ON ${tabla} (grupo_id)`);
+      }
     })().catch((error) => {
       tablasPreparadas = null;
       throw error;
@@ -85,11 +128,12 @@ async function responder(sock, msg, texto) {
   await sock.sendMessage(msg.key.remoteJid, { text: texto }, { quoted: msg });
 }
 
-async function listar(tipo, sock, msg) {
+async function listar(tipo, grupoId, sock, msg) {
   const tabla = tipo === 'teams' ? 'teams' : 'tiendas';
   const etiqueta = tipo === 'teams' ? 'equipos' : 'tiendas';
   const filas = await db.all(
-    `SELECT id, nombre, descripcion, ubicacion, propietario, estado FROM ${tabla} ORDER BY id`
+    `SELECT id, nombre_con_emoji, estado FROM ${tabla} WHERE grupo_id = ? ORDER BY id`,
+    [grupoId]
   );
 
   if (!filas.length) {
@@ -97,51 +141,52 @@ async function listar(tipo, sock, msg) {
     return;
   }
 
-  const listado = filas.map((fila) => {
-    const detalle = tipo === 'teams'
-      ? `📝 ${fila.descripcion}`
-      : `📍 ${fila.ubicacion}`;
-    return `ID ${fila.id} · ${fila.nombre}\n${detalle}\n🔘 Estado: ${fila.estado}`;
-  }).join('\n\n');
+  const listado = filas
+    .map((fila) => `ID ${fila.id} · ${fila.nombre_con_emoji}\n🔘 Estado: ${fila.estado}`)
+    .join('\n\n');
 
   await responder(sock, msg, `${tipo === 'teams' ? '👥 Equipos' : '🏪 Tiendas'}:\n\n${listado}`);
 }
 
-async function agregar(tipo, valor, propietario, sock, msg) {
-  const [nombre, detalle] = separarCampos(valor);
-  if (!nombre || !detalle) {
+async function agregar(tipo, nombre, grupoId, propietarioId, sock, msg) {
+  if (!nombre.trim()) {
     await responder(sock, msg, RESPUESTAS.faltanDatos);
     return;
   }
 
   const tabla = tipo === 'teams' ? 'teams' : 'tiendas';
-  const columnaDetalle = tipo === 'teams' ? 'descripcion' : 'ubicacion';
   const resultado = await db.run(
-    `INSERT INTO ${tabla} (nombre, ${columnaDetalle}, propietario, estado) VALUES (?, ?, ?, 'activo')`,
-    [nombre, detalle, propietario]
+    `INSERT INTO ${tabla}
+      (grupo_id, propietario_id, nombre_con_emoji, nombre, descripcion, ubicacion, propietario, estado)
+     VALUES (?, ?, ?, ?, '', '', ?, 'activo')`,
+    [grupoId, propietarioId, nombre.trim(), nombre.trim(), propietarioId]
   );
-  await responder(sock, msg, RESPUESTAS.agregado(tipo === 'teams' ? 'Equipo' : 'Tienda', resultado.lastID));
+  await responder(
+    sock,
+    msg,
+    RESPUESTAS.agregado(tipo === 'teams' ? 'Equipo' : 'Tienda', nombre.trim(), resultado.lastID)
+  );
 }
 
-async function editar(tipo, valor, sock, msg) {
+async function editar(tipo, valor, grupoId, sock, msg) {
   const match = valor.match(/^(\d+)\s+([\s\S]+)$/);
   if (!match) {
-    await responder(sock, msg, tipo === 'teams' ? RESPUESTAS.ayudaTeams : RESPUESTAS.ayudaEdicionTienda);
+    await responder(sock, msg, RESPUESTAS.ayudaEdicion(tipo));
     return;
   }
 
-  const [, id, cambios] = match;
-  const [nombre, detalle] = separarCampos(cambios);
-  if (!validarId(id) || !nombre || !detalle) {
+  const [, id, nombre] = match;
+  if (!validarId(id) || !nombre.trim()) {
     await responder(sock, msg, RESPUESTAS.faltanDatos);
     return;
   }
 
   const tabla = tipo === 'teams' ? 'teams' : 'tiendas';
-  const columnaDetalle = tipo === 'teams' ? 'descripcion' : 'ubicacion';
   const resultado = await db.run(
-    `UPDATE ${tabla} SET nombre = ?, ${columnaDetalle} = ? WHERE id = ?`,
-    [nombre, detalle, Number(id)]
+    `UPDATE ${tabla}
+     SET nombre_con_emoji = ?, nombre = ?
+     WHERE id = ? AND grupo_id = ?`,
+    [nombre.trim(), nombre.trim(), Number(id), grupoId]
   );
 
   if (!resultado.changes) {
@@ -151,7 +196,7 @@ async function editar(tipo, valor, sock, msg) {
   await responder(sock, msg, RESPUESTAS.actualizado(tipo === 'teams' ? 'Equipo' : 'Tienda', id));
 }
 
-async function eliminar(tipo, valor, sock, msg) {
+async function eliminar(tipo, valor, grupoId, sock, msg) {
   const id = valor.trim();
   if (!validarId(id)) {
     await responder(sock, msg, `⚠️ Indica un ID numérico.\n${tipo === 'teams' ? RESPUESTAS.ayudaTeams : RESPUESTAS.ayudaTiendas}`);
@@ -159,7 +204,10 @@ async function eliminar(tipo, valor, sock, msg) {
   }
 
   const tabla = tipo === 'teams' ? 'teams' : 'tiendas';
-  const resultado = await db.run(`DELETE FROM ${tabla} WHERE id = ?`, [Number(id)]);
+  const resultado = await db.run(
+    `DELETE FROM ${tabla} WHERE id = ? AND grupo_id = ?`,
+    [Number(id), grupoId]
+  );
   if (!resultado.changes) {
     await responder(sock, msg, RESPUESTAS.noEncontrado(tipo === 'teams' ? 'el equipo' : 'la tienda', id));
     return;
@@ -170,20 +218,36 @@ async function eliminar(tipo, valor, sock, msg) {
 async function ejecutar(sock, msg, context = {}) {
   try {
     const remitente = msg.key.participant || msg.key.remoteJid;
-    if (!esAdmin(remitente)) {
-      await responder(sock, msg, RESPUESTAS.soloAdmin);
+    const grupoId = msg.key.remoteJid;
+    if (!grupoId?.endsWith('@g.us')) {
+      await responder(sock, msg, RESPUESTAS.soloGrupo);
       return;
     }
 
     await prepararTablas();
+    const adminGrupo = await detectarAdminGrupo(sock, grupoId, remitente);
+    if (adminGrupo === null) {
+      await responder(sock, msg, RESPUESTAS.noMetadata);
+      return;
+    }
+    const propietarioGlobal = esPropietarioGlobal(context.ownerId, remitente);
+    const tienePermiso = adminGrupo || propietarioGlobal;
+    if (!adminGrupo && propietarioGlobal) {
+      console.log(`🔑 Usuario ${remitente} no es admin en grupo ${grupoId}, autorizado como propietario global.`);
+    }
+
     const texto = obtenerTexto(msg);
     const comando = context.command || `/${texto.split(/\s+/)[0]?.replace(/^\//, '')}`;
     const resto = texto.replace(/^\/\S+\s*/i, '').trim();
 
     if (comando === '/teams_tiendas') {
+      if (!tienePermiso) {
+        await responder(sock, msg, RESPUESTAS.soloAdmin);
+        return;
+      }
       const [equipos, tiendas] = await Promise.all([
-        db.get('SELECT COUNT(*) AS total FROM teams'),
-        db.get('SELECT COUNT(*) AS total FROM tiendas')
+        db.get('SELECT COUNT(*) AS total FROM teams WHERE grupo_id = ?', [grupoId]),
+        db.get('SELECT COUNT(*) AS total FROM tiendas WHERE grupo_id = ?', [grupoId])
       ]);
       await responder(sock, msg, RESPUESTAS.estado(equipos.total, tiendas.total));
       return;
@@ -194,13 +258,25 @@ async function ejecutar(sock, msg, context = {}) {
     const valor = partes.join(' ').trim();
 
     if (accion === 'lista') {
-      await listar(tipo, sock, msg);
+      await listar(tipo, grupoId, sock, msg);
     } else if (accion === 'agregar') {
-      await agregar(tipo, valor, remitente, sock, msg);
+      if (!tienePermiso) {
+        await responder(sock, msg, RESPUESTAS.soloAdmin);
+        return;
+      }
+      await agregar(tipo, valor, grupoId, remitente, sock, msg);
     } else if (accion === 'editar') {
-      await editar(tipo, valor, sock, msg);
+      if (!tienePermiso) {
+        await responder(sock, msg, RESPUESTAS.soloAdmin);
+        return;
+      }
+      await editar(tipo, valor, grupoId, sock, msg);
     } else if (accion === 'eliminar') {
-      await eliminar(tipo, valor, sock, msg);
+      if (!tienePermiso) {
+        await responder(sock, msg, RESPUESTAS.soloAdmin);
+        return;
+      }
+      await eliminar(tipo, valor, grupoId, sock, msg);
     } else {
       await responder(sock, msg, tipo === 'teams' ? RESPUESTAS.ayudaTeams : RESPUESTAS.ayudaTiendas);
     }
