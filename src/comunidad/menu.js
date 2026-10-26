@@ -21,7 +21,8 @@ const COMANDOS_MENU = [
   '/menu-dinamicas',
   '/menu-perfil',
   '/menu-desafios',
-  '/menu-config'
+  '/menu-config',
+  '/menu-utilidades'
 ];
 
 export const comandos = COMANDOS_MENU;
@@ -103,6 +104,18 @@ ${PIE_MENU}`,
 /rechazar → Rechazar un desafío
 /clasificacion → Ver ranking general de puntos
 
+${PIE_MENU}`,
+  '/menu-utilidades': `${ENCABEZADO_MENU('𝐔𝐓𝐈𝐋𝐈𝐃𝐀𝐃𝐄𝐒')}
+
+🛠️ Stickers
+/sticker → Crear un sticker respondiendo a una imagen
+/s → Alias rápido para crear stickers
+/sticker círculo → Sticker circular
+/sticker cuadrado → Sticker cuadrado
+/sticker eliminar-fondo → Quitar el fondo y crear un sticker
+
+💡 También puedes enviar una imagen con /sticker como texto.
+
 ${PIE_MENU}`
 };
 
@@ -132,6 +145,7 @@ Elige una categoría:
 /menu-dinamicas → Dinámicas
 /menu-perfil → Perfil, Puntos e Inventario
 /menu-desafios → Desafíos y Batallas
+/menu-utilidades → 🛠️ Utilidades
 /menu-config → Bienvenida y Ayuda
 ${listadoPlugins}
 
@@ -196,7 +210,15 @@ export function activarMenu(sock, obtenerPlugins = () => new Map()) {
       const msg = messages[0];
       if (!msg?.message || msg.key?.fromMe) return;
 
-      const texto = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
+      const contenido = msg.message.ephemeralMessage?.message ||
+        msg.message.viewOnceMessage?.message ||
+        msg.message.viewOnceMessageV2?.message ||
+        msg.message;
+      const texto = contenido?.conversation ||
+        contenido?.extendedTextMessage?.text ||
+        contenido?.imageMessage?.caption ||
+        contenido?.videoMessage?.caption ||
+        '';
       const textoNormalizado = texto.trim().toLowerCase();
 
       if (!COMANDOS_MENU.includes(textoNormalizado)) return;

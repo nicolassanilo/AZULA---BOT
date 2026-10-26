@@ -446,7 +446,15 @@ async function connectToWhatsApp() {
                 }
             }
 
-            const text = msg.message?.conversation || msg.message?.extendedTextMessage?.text || '';
+            const messageContent = msg.message?.ephemeralMessage?.message ||
+                msg.message?.viewOnceMessage?.message ||
+                msg.message?.viewOnceMessageV2?.message ||
+                msg.message;
+            const text = messageContent?.conversation ||
+                messageContent?.extendedTextMessage?.text ||
+                messageContent?.imageMessage?.caption ||
+                messageContent?.videoMessage?.caption ||
+                '';
             const prefix = '/';
 
             if (!text.startsWith(prefix)) {
