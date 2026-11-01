@@ -1,5 +1,4 @@
-import { cargarRanking, guardarRanking } from '../src/comunidad/sistema/ranking.js';
-import { obtenerEquipoUsuario } from '../src/comunidad/sistema/perfiles.js';
+import { obtenerPerfilEquipo, registrarPuntosEquipo } from '../src/plugins/equipos.js';
 
 export const command = ['/retar', '/aceptar', '/rechazar'];
 
@@ -61,25 +60,9 @@ function enviarMensaje(sock, grupoId, texto, msg = null) {
   return sock.sendMessage(grupoId, { text: texto }, opciones);
 }
 
-function obtenerRankingSeguro() {
-  const datos = cargarRanking();
-  datos.usuarios = datos.usuarios || {};
-  datos.equipos = {
-    '🍥': Number(datos.equipos?.['🍥'] || 0),
-    '🩸': Number(datos.equipos?.['🩸'] || 0),
-    '🔰': Number(datos.equipos?.['🔰'] || 0)
-  };
-  return datos;
-}
-
-function obtenerPuntosUsuario(usuarioId) {
-  const datos = obtenerRankingSeguro();
-  return Number(datos.usuarios?.[normalizarUsuarioId(usuarioId)]?.puntos || 0);
-}
-
-function obtenerEquipoEmoji(usuarioId) {
-  const equipo = obtenerEquipoUsuario(normalizarUsuarioId(usuarioId));
-  return equipo?.emoji || '❔';
+async function obtenerPuntosUsuario(usuarioId) {
+  const perfil = await obtenerPerfilEquipo(normalizarUsuarioId(usuarioId));
+  return Number(perfil?.puntos_totales || 0);
 }
 
 function construirUso() {
@@ -124,38 +107,6 @@ function iniciarExpiracion(grupoId, desafio, sock) {
   }, tiempoRestante);
 }
 
-function actualizarPuntosConResultado(datos, ganadorId, perdedorId, monto) {
-  const ganadorNormalizado = normalizarUsuarioId(ganadorId);
-  const perdedorNormalizado = normalizarUsuarioId(perdedorId);
-
-  const ganadorActual = datos.usuarios[ganadorNormalizado] || { puntos: 0, nombre: ganadorNormalizado };
-  const perdedorActual = datos.usuarios[perdedorNormalizado] || { puntos: 0, nombre: perdedorNormalizado };
-
-  ganadorActual.puntos = Number(ganadorActual.puntos || 0) + Number(monto || 0);
-  ganadorActual.nombre = ganadorActual.nombre || ganadorNormalizado;
-  ganadorActual.equipo = obtenerEquipoEmoji(ganadorNormalizado);
-
-  perdedorActual.puntos = Math.max(0, Number(perdedorActual.puntos || 0) - Number(monto || 0));
-  perdedorActual.nombre = perdedorActual.nombre || perdedorNormalizado;
-  perdedorActual.equipo = obtenerEquipoEmoji(perdedorNormalizado);
-
-  datos.usuarios[ganadorNormalizado] = ganadorActual;
-  datos.usuarios[perdedorNormalizado] = perdedorActual;
-
-  const equipoGanador = obtenerEquipoUsuario(ganadorNormalizado);
-  const equipoPerdedor = obtenerEquipoUsuario(perdedorNormalizado);
-
-  if (equipoGanador?.emoji) {
-    datos.equipos[equipoGanador.emoji] = Number(datos.equipos[equipoGanador.emoji] || 0) + Number(monto || 0);
-  }
-
-  if (equipoPerdedor?.emoji) {
-    datos.equipos[equipoPerdedor.emoji] = Math.max(0, Number(datos.equipos[equipoPerdedor.emoji] || 0) - Number(monto || 0));
-  }
-
-  return datos;
-}
-
 export async function run(sock, msg, { command, args = [] }) {
   const grupoId = msg.key.remoteJid;
   const remitente = normalizarUsuarioId(msg.key.participant || msg.key.remoteJid);
@@ -183,16 +134,18 @@ export async function run(sock, msg, { command, args = [] }) {
       return;
     }
 
-    const equipoDesafiante = obtenerEquipoUsuario(desafianteId);
-    const equipoDesafiado = obtenerEquipoUsuario(desafiadoId);
+    const equipoDesafiante = await obtenerPerfilEquipo(desafianteId);
+    const equipoDesafiado = await obtenerPerfilEquipo(desafiadoId);
 
-    if (!equipoDesafiante || !equipoDesafiado) {
-      await enviarMensaje(sock, grupoId, '⚠️ Uno de los usuarios no tiene equipo asignado.', msg);
+    if (!equipoDesafiante || !equipoDesafiado ||
+      equipoDesafiante.grupo_id !== grupoId ||
+      equipoDesafiado.grupo_id !== grupoId) {
+      await enviarMensaje(sock, grupoId, '⚠️ Necesitas un perfil: /crearperfil. Ambos usuarios deben tener un perfil con Team asignado.', msg);
       return;
     }
 
     const nivel = nivelSolicitado.nivel;
-    const mismoEquipo = equipoDesafiante.emoji === equipoDesafiado.emoji;
+    const mismoEquipo = Number(equipoDesafiante.team_id) === Number(equipoDesafiado.team_id);
 
     if (mismoEquipo && nivel !== 1) {
       await enviarMensaje(sock, grupoId, '⛔ Nivel no permitido para desafiar a alguien de tu mismo equipo.\nUsa Nivel 1 o desafía a alguien de otro equipo.', msg);
@@ -207,8 +160,8 @@ export async function run(sock, msg, { command, args = [] }) {
     const nivelConfig = NIVEL_CONFIG[nivel];
     const montoApuesta = nivelConfig.monto;
 
-    const puntosDesafiante = obtenerPuntosUsuario(desafianteId);
-    const puntosDesafiado = obtenerPuntosUsuario(desafiadoId);
+    const puntosDesafiante = await obtenerPuntosUsuario(desafianteId);
+    const puntosDesafiado = await obtenerPuntosUsuario(desafiadoId);
 
     if (puntosDesafiante < montoApuesta) {
       await enviarMensaje(sock, grupoId, `❌ No tienes suficientes puntos para este desafío.\nNecesitas: ${montoApuesta.toLocaleString('es-AR')} pts · Tenés: ${puntosDesafiante.toLocaleString('es-AR')} pts`, msg);
@@ -231,6 +184,8 @@ export async function run(sock, msg, { command, args = [] }) {
       grupoId,
       desafiante: desafianteId,
       desafiado: desafiadoId,
+      teamDesafiante: equipoDesafiante.team_id,
+      teamDesafiado: equipoDesafiado.team_id,
       nivel,
       monto: montoApuesta,
       nombreNivel: nivelConfig.nombre,
@@ -244,8 +199,8 @@ export async function run(sock, msg, { command, args = [] }) {
     await enviarMensaje(sock, grupoId, `
 ⚔️ DESAFÍO LANZADO ⚔️
 ───────────────────────────
-🥷 Desafiante: @${desafianteId} ${equipoDesafiante.emoji}
-🥷 Desafiado: @${desafiadoId} ${equipoDesafiado.emoji}
+🥷 Desafiante: @${desafianteId} ${equipoDesafiante.nombre_con_emoji}
+🥷 Desafiado: @${desafiadoId} ${equipoDesafiado.nombre_con_emoji}
 📊 Nivel: ${nivel} ${nivelConfig.nombre}
 💸 Apuesta: ${montoApuesta.toLocaleString('es-AR')} pts
 
@@ -278,12 +233,12 @@ export async function run(sock, msg, { command, args = [] }) {
     const ganadorId = ganaDesafiante ? desafio.desafiante : desafio.desafiado;
     const perdedorId = ganaDesafiante ? desafio.desafiado : desafio.desafiante;
 
-    let datos = obtenerRankingSeguro();
-    datos = actualizarPuntosConResultado(datos, ganadorId, perdedorId, desafio.monto);
-    guardarRanking(datos);
-
-    const puntosGanador = Number(datos.usuarios?.[normalizarUsuarioId(ganadorId)]?.puntos || 0);
-    const puntosPerdedor = Number(datos.usuarios?.[normalizarUsuarioId(perdedorId)]?.puntos || 0);
+    const teamGanador = ganadorId === desafio.desafiante ? desafio.teamDesafiante : desafio.teamDesafiado;
+    const teamPerdedor = perdedorId === desafio.desafiante ? desafio.teamDesafiante : desafio.teamDesafiado;
+    await registrarPuntosEquipo(ganadorId, teamGanador, Number(desafio.monto || 0), 'Victoria en desafío');
+    await registrarPuntosEquipo(perdedorId, teamPerdedor, -Number(desafio.monto || 0), 'Derrota en desafío');
+    const puntosGanador = await obtenerPuntosUsuario(ganadorId);
+    const puntosPerdedor = await obtenerPuntosUsuario(perdedorId);
 
     await enviarMensaje(sock, grupoId, `
 🏆 ¡GANADOR: @${ganadorId}! 🎉

@@ -439,6 +439,10 @@ export function activarPerfiles(sock) {
 
       const comando = texto.toLowerCase();
 
+      if (['/perfil', '/miperfil', '/crearperfil', '/registrar'].includes(comando.split(/\s+/, 1)[0])) {
+        return;
+      }
+
       if (comando === '/perfil' || comando === '/miperfil') {
         await enviarPerfilActual(sock, grupoId, remitente, msg);
         return;

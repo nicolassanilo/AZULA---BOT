@@ -7,7 +7,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { readJsonFileSafe, writeJsonFileSafe } from '../../comunidad/archivos-seguros.js';
 
-import { agregarPuntos } from '../../comunidad/sistema/ranking.js';
+import { obtenerPerfilEquipo, registrarPuntosEquipo } from '../equipos.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -146,6 +146,8 @@ function registrarEscucha(sock) {
 
       const usuarioId = normalizarUsuarioId(msg.key.participant || msg.key.remoteJid);
       const usuarioNombre = msg.pushName || usuarioId;
+      const perfil = await obtenerPerfilEquipo(usuarioId);
+      if (!perfil || Number(perfil.team_id) !== Number(dinamicaActiva.teamId)) return;
       const validador = dinamicaActiva.datos?.validarRespuesta;
 
       const esCorrecta = typeof validador === 'function'
@@ -252,7 +254,7 @@ async function procesarRonda(sock, grupoId, datos, numeroRonda, pregunta) {
     const item = ganadores[index];
     const puntos = Number(item.premio.puntos || 0);
 
-    await agregarPuntos(item.usuarioId, item.usuario, puntos);
+    await registrarPuntosEquipo(item.usuarioId, dinamicaActiva.teamId, puntos, `Dinámica ${datos.id}`);
 
     registrarResultadoRonda({
       fecha: new Date().toISOString(),
@@ -273,7 +275,7 @@ async function procesarRonda(sock, grupoId, datos, numeroRonda, pregunta) {
     const puntosResto = Number(premioResto?.puntos || 0);
 
     for (const item of resto) {
-      await agregarPuntos(item.usuarioId, item.usuario, puntosResto);
+      await registrarPuntosEquipo(item.usuarioId, dinamicaActiva.teamId, puntosResto, `Dinámica ${datos.id}`);
       registrarResultadoRonda({
         fecha: new Date().toISOString(),
         tipo,
@@ -292,11 +294,12 @@ async function procesarRonda(sock, grupoId, datos, numeroRonda, pregunta) {
   await enviarMensaje(sock, grupoId, resultadoTexto);
 }
 
-export async function iniciarDinámicaComun(sock, grupoId, datos) {
+export async function iniciarDinámicaComun(sock, grupoId, datos, teamId) {
   registrarEscucha(sock);
 
   dinamicaActiva = {
     grupoId,
+    teamId,
     activa: true,
     escuchando: false,
     respuestas: [],

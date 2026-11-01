@@ -372,7 +372,7 @@ async function manejarCompletar(sock, msg, args) {
   await enviarMensaje(sock, grupoId, recibo, msg);
 }
 
-export const command = ['/misiones', '/completar'];
+export const command = ['/completar'];
 
 export async function run(sock, msg, { command, args = [] }) {
   if (command === '/misiones') {

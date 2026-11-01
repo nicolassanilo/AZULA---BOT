@@ -22,7 +22,7 @@ const RESPUESTAS = {
   estado: (equipos, tiendas) => `✅ Plugin Teams y Tiendas activo en este grupo.\n👥 Equipos: ${equipos}\n🏪 Tiendas: ${tiendas}`
 };
 
-const COMANDOS = ['/teams', '/tiendas', '/teams_tiendas', '/puntos'];
+const COMANDOS = ['/teams_tiendas'];
 let tablasPreparadas;
 
 function obtenerTexto(msg) {
@@ -406,7 +406,7 @@ async function ejecutar(sock, msg, context = {}) {
         return;
       }
       const [equipos, tiendas] = await Promise.all([
-        db.get('SELECT COUNT(*) AS total FROM teams WHERE grupo_id = ?', [grupoId]),
+        db.get('SELECT COUNT(*) AS total FROM equipos WHERE grupo_id = ? AND activo = 1', [grupoId]),
         db.get('SELECT COUNT(*) AS total FROM tiendas WHERE grupo_id = ?', [grupoId])
       ]);
       await responder(sock, msg, RESPUESTAS.estado(equipos.total, tiendas.total));
