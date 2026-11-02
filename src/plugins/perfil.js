@@ -1,7 +1,7 @@
 import { db } from '../../db.js';
 import { obtenerEquipo, obtenerPerfilEquipo, prepararTablasEquipos } from './equipos.js';
 
-const COMANDOS = ['/crearperfil', '/registrar', '/miperfil', '/perfil'];
+const COMANDOS = ['/crearperfil', '/miperfil', '/perfil'];
 
 async function responder(sock, msg, texto) {
   await sock.sendMessage(msg.key.remoteJid, { text: texto }, { quoted: msg });

@@ -2,6 +2,8 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { readJsonFileSafe, writeJsonFileSafe } from '../archivos-seguros.js';
+import { db } from '../../../db.js';
+import { prepararTablasEquipos } from '../../plugins/equipos.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -10,7 +12,8 @@ const RUTA_DATOS = path.join(__dirname, '../../../data/perfiles.json');
 export const EQUIPOS = {
   '🍥': { nombre: 'Team Naruto', emoji: '🍥' },
   '🩸': { nombre: 'Team Jujutsu Kaisen', emoji: '🩸' },
-  '🔰': { nombre: 'Team Hunter × Hunter', emoji: '🔰' }
+  '🔰': { nombre: 'Team Hunter × Hunter', emoji: '🔰' },
+  '🌊🔥': { nombre: 'Team Avatar', emoji: '🌊🔥' }
 };
 
 export const GENEROS = {
@@ -21,6 +24,131 @@ export const GENEROS = {
 };
 
 const registrosEnCurso = new Map();
+let esquemaPerfilesPreparado;
+
+function normalizarNombreEquipo(nombre) {
+  return String(nombre || '').toLocaleLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+}
+
+async function prepararPersistenciaPerfiles() {
+  if (!esquemaPerfilesPreparado) {
+    esquemaPerfilesPreparado = (async () => {
+      await prepararTablasEquipos();
+      const columnas = new Set((await db.all('PRAGMA table_info(perfiles)')).map((columna) => columna.name));
+
+      for (const [nombre, definicion] of [
+        ['nombre', 'TEXT'],
+        ['genero', 'TEXT'],
+        ['fecha_nacimiento', 'TEXT'],
+        ['fecha_registro', 'TEXT'],
+        ['grupo_id', 'TEXT']
+      ]) {
+        if (!columnas.has(nombre)) {
+          await db.run(`ALTER TABLE perfiles ADD COLUMN ${nombre} ${definicion}`);
+          columnas.add(nombre);
+        }
+      }
+    })().catch((error) => {
+      esquemaPerfilesPreparado = null;
+      throw error;
+    });
+  }
+
+  await esquemaPerfilesPreparado;
+}
+
+async function asegurarEquiposDisponibles(grupoId) {
+  await prepararPersistenciaPerfiles();
+  const existentes = await db.all(
+    'SELECT id, nombre_con_emoji FROM equipos WHERE grupo_id = ?',
+    [grupoId]
+  );
+  const teamIds = {};
+
+  for (const [emoji, equipo] of Object.entries(EQUIPOS)) {
+    const nombreNormalizado = normalizarNombreEquipo(equipo.nombre);
+    let fila = existentes.find((item) =>
+      normalizarNombreEquipo(item.nombre_con_emoji) === nombreNormalizado
+    );
+
+    if (!fila) {
+      const nombreConEmoji = `${equipo.nombre} ${equipo.emoji}`;
+      const resultado = await db.run(
+        'INSERT OR IGNORE INTO equipos (nombre_con_emoji, grupo_id, admin_id) VALUES (?, ?, ?)',
+        [nombreConEmoji, grupoId, 'sistema']
+      );
+      fila = resultado.lastID
+        ? { id: resultado.lastID, nombre_con_emoji: nombreConEmoji }
+        : await db.get(
+          'SELECT id, nombre_con_emoji FROM equipos WHERE grupo_id = ? AND nombre_con_emoji = ? COLLATE NOCASE',
+          [grupoId, nombreConEmoji]
+        );
+      if (fila) existentes.push(fila);
+    }
+
+    if (fila) {
+      teamIds[emoji] = Number(fila.id);
+    }
+  }
+
+  return teamIds;
+}
+
+async function obtenerPerfilPersistido(usuarioId) {
+  await prepararPersistenciaPerfiles();
+  return db.get(
+    `SELECT p.id_usuario, p.nombre, p.genero, p.fecha_nacimiento, p.fecha_registro,
+            p.team_id, p.grupo_id, e.nombre_con_emoji
+     FROM perfiles p
+     LEFT JOIN equipos e ON e.id = p.team_id
+     WHERE p.id_usuario = ?`,
+    [normalizarUsuario(usuarioId)]
+  );
+}
+
+function mostrarPerfilRegistrado(perfil) {
+  const equipoPorClave = EQUIPOS[perfil?.equipo];
+  const nombreEquipo = perfil?.nombre_con_emoji ||
+    (equipoPorClave ? `${equipoPorClave.nombre} ${equipoPorClave.emoji}` : 'Sin equipo');
+  return `Ya estás registrado: ${perfil?.nombre || 'Sin nombre'} — ${nombreEquipo}`;
+}
+
+function textoOpcionesEquipos() {
+  return Object.values(EQUIPOS)
+    .map((equipo, index) => `${index + 1}️⃣ ${equipo.emoji} ${equipo.nombre}`)
+    .join('\n');
+}
+
+function parsearFechaNacimiento(texto) {
+  const valor = String(texto || '').trim();
+  if (valor.toLowerCase() === 'omitir') return { valida: true, fecha: null };
+
+  const coincidencia = valor.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (!coincidencia) return { valida: false, fecha: null };
+
+  const [, diaTexto, mesTexto, anioTexto] = coincidencia;
+  const dia = Number(diaTexto);
+  const mes = Number(mesTexto);
+  const anio = Number(anioTexto);
+  const fecha = new Date(Date.UTC(anio, mes - 1, dia));
+
+  if (
+    fecha.getUTCFullYear() !== anio ||
+    fecha.getUTCMonth() !== mes - 1 ||
+    fecha.getUTCDate() !== dia ||
+    fecha > new Date()
+  ) {
+    return { valida: false, fecha: null };
+  }
+
+  return { valida: true, fecha: `${anioTexto}-${mesTexto}-${diaTexto}` };
+}
+
+function formatearFechaNacimiento(fecha) {
+  if (!fecha) return 'No especificada';
+  const coincidencia = String(fecha).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return coincidencia ? `${coincidencia[3]}/${coincidencia[2]}/${coincidencia[1]}` : fecha;
+}
 
 function crearEstructuraInicial() {
   return {};
@@ -134,10 +262,12 @@ export function obtenerEquipoUsuario(usuarioId, nombreUsuario = '') {
   return detectarEquipoPorEmoji(nombreUsuario);
 }
 
-function iniciarRegistro(usuarioId) {
+function iniciarRegistro(usuarioId, grupoId, teamIds) {
   registrosEnCurso.set(usuarioId, {
     tipo: 'registro',
     paso: 1,
+    grupoId,
+    teamIds,
     datos: {}
   });
 }
@@ -165,23 +295,35 @@ function parsearGenero(texto) {
 function parsearEquipo(texto) {
   const valor = String(texto || '').trim();
 
-  if (valor === '1' || valor.includes('🍥') || valor.toLowerCase().includes('naruto')) {
-    return '🍥';
-  }
-
-  if (valor === '2' || valor.includes('🩸') || valor.toLowerCase().includes('jujutsu')) {
-    return '🩸';
-  }
-
-  if (valor === '3' || valor.includes('🔰') || valor.toLowerCase().includes('hunter')) {
-    return '🔰';
+  for (const [indice, [emoji, equipo]] of Object.entries(EQUIPOS).entries()) {
+    if (
+      valor === String(indice + 1) ||
+      valor.includes(emoji) ||
+      valor.toLocaleLowerCase().includes(equipo.nombre.toLocaleLowerCase())
+    ) {
+      return emoji;
+    }
   }
 
   return null;
 }
 
 async function enviarPerfilActual(sock, grupoId, remitente, msg) {
-  const perfil = obtenerPerfil(remitente);
+  const perfilJson = obtenerPerfil(remitente);
+  const perfilPersistido = await obtenerPerfilPersistido(remitente);
+  const equipoCoincidente = perfilPersistido?.nombre_con_emoji
+    ? Object.entries(EQUIPOS).find(([, equipo]) =>
+      normalizarNombreEquipo(perfilPersistido.nombre_con_emoji).includes(normalizarNombreEquipo(equipo.nombre))
+    )
+    : null;
+  const perfil = perfilJson || (perfilPersistido && {
+    nombre: perfilPersistido.nombre,
+    genero: perfilPersistido.genero,
+    fechaNacimiento: perfilPersistido.fecha_nacimiento,
+    fechaRegistro: perfilPersistido.fecha_registro,
+    equipo: equipoCoincidente?.[0],
+    nombre_con_emoji: perfilPersistido.nombre_con_emoji
+  });
 
   if (!perfil) {
     await sock.sendMessage(grupoId, {
@@ -191,14 +333,17 @@ async function enviarPerfilActual(sock, grupoId, remitente, msg) {
   }
 
   const genero = GENEROS[perfil.genero] || GENEROS.N;
-  const equipo = EQUIPOS[perfil.equipo] || { nombre: 'Sin equipo', emoji: '❔' };
+  const equipo = EQUIPOS[perfil.equipo] || {
+    nombre: perfil.nombre_con_emoji || 'Sin equipo',
+    emoji: '❔'
+  };
 
   const mensaje = `👤 *TU PERFIL* 👤
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 📛 Nombre: ${perfil.nombre || 'No especificado'}
 ${genero.emoji} Género: ${genero.nombre}
-🎂 Fecha de nacimiento: ${perfil.fechaNacimiento || 'No especificada'}
+🎂 Fecha de nacimiento: ${formatearFechaNacimiento(perfil.fechaNacimiento)}
 ${equipo.emoji} Equipo: ${equipo.nombre}
 📅 Registrado: ${formatearFecha(perfil.fechaRegistro)}
 🕒 Última actualización: ${formatearFecha(perfil.ultimaActualizacion)}
@@ -257,11 +402,19 @@ async function procesarRespuestaRegistro(sock, grupoId, remitente, texto, msg) {
 
   if (registro.paso === 3) {
     const respuesta = texto.trim();
-    registro.datos.fechaNacimiento = respuesta.toLowerCase() === 'omitir' ? null : respuesta;
+    const fecha = parsearFechaNacimiento(respuesta);
+    if (!fecha.valida) {
+      await sock.sendMessage(grupoId, {
+        text: '⚠️ Fecha inválida. Usá el formato DD/MM/AAAA con una fecha real que no sea futura, o escribí *omitir*.'
+      }, { quoted: msg });
+      return true;
+    }
+
+    registro.datos.fechaNacimiento = fecha.fecha;
     registro.paso = 4;
 
     await sock.sendMessage(grupoId, {
-      text: '📝 *PASO 4 de 4 - ÚLTIMO PASO*\n\n⚔️ ¿A qué equipo querés unirte?\n\n1️⃣ 🍥 Team Naruto\n2️⃣ 🩸 Team Jujutsu Kaisen\n3️⃣ 🔰 Team Hunter × Hunter\n\nEscribí el número:'
+      text: `📝 *PASO 4 de 4 - ÚLTIMO PASO*\n\n⚔️ ¿A qué equipo querés unirte?\n\n${textoOpcionesEquipos()}\n\nEscribí el número:`
     }, { quoted: msg });
     return true;
   }
@@ -271,7 +424,51 @@ async function procesarRespuestaRegistro(sock, grupoId, remitente, texto, msg) {
 
     if (!equipoElegido) {
       await sock.sendMessage(grupoId, {
-        text: '⚠️ Opción inválida. Escribí 1, 2 o 3 según tu equipo.'
+        text: `⚠️ Opción inválida. Elegí un número de la lista:\n\n${textoOpcionesEquipos()}`
+      }, { quoted: msg });
+      return true;
+    }
+
+    const teamId = registro.teamIds?.[equipoElegido];
+    if (!teamId) {
+      await sock.sendMessage(grupoId, {
+        text: '❌ No se encontró ese equipo en la base de datos. Escribí */registrar* para volver a intentar.'
+      }, { quoted: msg });
+      finalizarRegistro(remitente);
+      return true;
+    }
+
+    const fechaRegistro = new Date().toISOString();
+    try {
+      await prepararPersistenciaPerfiles();
+      const resultado = await db.run(
+        `INSERT INTO perfiles
+          (id_usuario, team_id, nombre, genero, fecha_nacimiento, fecha_registro, grupo_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id_usuario) DO NOTHING`,
+        [
+          normalizarUsuario(remitente),
+          teamId,
+          registro.datos.nombre,
+          registro.datos.genero,
+          registro.datos.fechaNacimiento,
+          fechaRegistro,
+          registro.grupoId
+        ]
+      );
+
+      if (!resultado.changes) {
+        const perfilExistente = await obtenerPerfilPersistido(remitente);
+        finalizarRegistro(remitente);
+        await sock.sendMessage(grupoId, {
+          text: mostrarPerfilRegistrado(perfilExistente)
+        }, { quoted: msg });
+        return true;
+      }
+    } catch (error) {
+      console.error(`❌ No se pudo guardar el perfil de ${remitente}:`, error);
+      await sock.sendMessage(grupoId, {
+        text: '❌ No se pudo guardar tu registro en la base de datos. Tus respuestas siguen guardadas; intentá elegir el equipo nuevamente.'
       }, { quoted: msg });
       return true;
     }
@@ -279,16 +476,14 @@ async function procesarRespuestaRegistro(sock, grupoId, remitente, texto, msg) {
     const perfilCompleto = guardarPerfil(remitente, {
       ...registro.datos,
       equipo: equipoElegido,
-      fechaRegistro: new Date().toISOString()
+      fechaRegistro
     });
-
-    finalizarRegistro(remitente);
-
-    const genero = GENEROS[perfilCompleto.genero] || GENEROS.N;
     const equipo = EQUIPOS[equipoElegido];
+    finalizarRegistro(remitente);
+    console.log(`Usuario guardado: ID ${remitente}, Equipo ${equipo.nombre}`);
 
     await sock.sendMessage(grupoId, {
-      text: `🎉 *¡PERFIL CREADO CON ÉXITO!* 🎉\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n📛 Nombre: ${perfilCompleto.nombre}\n${genero.emoji} Género: ${genero.nombre}\n🎂 Fecha de nacimiento: ${perfilCompleto.fechaNacimiento || 'No especificada'}\n${equipo.emoji} Equipo: ${equipo.nombre}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n✅ ¡Ahora el bot te reconocerá automáticamente en todos los comandos!\nEscribí */perfil* para verlo cuando quieras.\n\n¡Bienvenido/a a ${equipo.nombre}! 🚀`
+      text: `✅ Registro completado! Bienvenido, ${perfilCompleto.nombre} del ${equipo.nombre}`
     }, { quoted: msg });
     return true;
   }
@@ -354,7 +549,7 @@ async function procesarRespuestaEdicion(sock, grupoId, remitente, texto, msg) {
 
     if (campo === 'equipo') {
       await sock.sendMessage(grupoId, {
-        text: '⚔️ Elegí tu equipo:\n\n1️⃣ 🍥 Team Naruto\n2️⃣ 🩸 Team Jujutsu Kaisen\n3️⃣ 🔰 Team Hunter × Hunter'
+        text: `⚔️ Elegí tu equipo:\n\n${textoOpcionesEquipos()}`
       }, { quoted: msg });
       return true;
     }
@@ -383,7 +578,14 @@ async function procesarRespuestaEdicion(sock, grupoId, remitente, texto, msg) {
 
     if (campo === 'fechaNacimiento') {
       const respuesta = texto.trim();
-      datosActualizados.fechaNacimiento = respuesta.toLowerCase() === 'omitir' ? null : respuesta;
+      const fecha = parsearFechaNacimiento(respuesta);
+      if (!fecha.valida) {
+        await sock.sendMessage(grupoId, {
+          text: '⚠️ Fecha inválida. Usá el formato DD/MM/AAAA con una fecha real que no sea futura, o escribí *omitir*.'
+        }, { quoted: msg });
+        return true;
+      }
+      datosActualizados.fechaNacimiento = fecha.fecha;
     }
 
     if (campo === 'equipo') {
@@ -391,7 +593,7 @@ async function procesarRespuestaEdicion(sock, grupoId, remitente, texto, msg) {
 
       if (!equipoElegido) {
         await sock.sendMessage(grupoId, {
-          text: '⚠️ Equipo inválido. Escribí 1, 2 o 3.'
+          text: `⚠️ Equipo inválido. Elegí un número de la lista:\n\n${textoOpcionesEquipos()}`
         }, { quoted: msg });
         return true;
       }
@@ -439,7 +641,7 @@ export function activarPerfiles(sock) {
 
       const comando = texto.toLowerCase();
 
-      if (['/perfil', '/miperfil', '/crearperfil', '/registrar'].includes(comando.split(/\s+/, 1)[0])) {
+      if (['/perfil', '/miperfil', '/crearperfil'].includes(comando.split(/\s+/, 1)[0])) {
         return;
       }
 
@@ -449,16 +651,25 @@ export function activarPerfiles(sock) {
       }
 
       if (comando === '/registrar' || comando === '/perfil crear') {
-        const perfilActual = obtenerPerfil(remitente);
+        const teamIds = await asegurarEquiposDisponibles(grupoId);
+        const perfilPersistido = await obtenerPerfilPersistido(remitente);
+        const perfilJson = obtenerPerfil(remitente);
+        const perfilActual = perfilPersistido
+          ? {
+            ...perfilJson,
+            ...perfilPersistido,
+            nombre: perfilPersistido.nombre || perfilJson?.nombre
+          }
+          : perfilJson;
 
         if (perfilActual) {
           await sock.sendMessage(grupoId, {
-            text: '✅ *Ya tenés un perfil registrado.*\n\nEscribí */perfil* para verlo o */editar-perfil* para modificarlo.'
+            text: mostrarPerfilRegistrado(perfilActual)
           }, { quoted: msg });
           return;
         }
 
-        iniciarRegistro(remitente);
+        iniciarRegistro(remitente, grupoId, teamIds);
         await sock.sendMessage(grupoId, {
           text: '📝 *REGISTRO DE PERFIL - PASO 1 de 4*\n\n👤 ¿Qué nombre querés usar en tu perfil?\n\nEscribí tu nombre a continuación...'
         }, { quoted: msg });
@@ -500,7 +711,7 @@ export function activarPerfiles(sock) {
         });
 
         await sock.sendMessage(grupoId, {
-          text: '⚔️ *ELEGIR EQUIPO*\n\n1️⃣ 🍥 Team Naruto\n2️⃣ 🩸 Team Jujutsu Kaisen\n3️⃣ 🔰 Team Hunter × Hunter\n\nEscribí el número del equipo deseado:'
+          text: `⚔️ *ELEGIR EQUIPO*\n\n${textoOpcionesEquipos()}\n\nEscribí el número del equipo deseado:`
         }, { quoted: msg });
         return;
       }
