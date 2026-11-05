@@ -195,6 +195,38 @@ export async function obtenerEquipo(teamId, grupoId) {
   );
 }
 
+export async function obtenerEquipoAvatar(grupoId) {
+  await prepararTablasEquipos();
+  const equipos = await db.all(
+    'SELECT id, nombre_con_emoji, grupo_id, admin_id, activo FROM equipos WHERE grupo_id = ? AND activo = 1',
+    [grupoId]
+  );
+  return equipos.find((equipo) => /team\s*avatar|avatar/i.test(equipo.nombre_con_emoji)) || null;
+}
+
+async function asegurarMisionesAvatar(equipo) {
+  if (!equipo) return;
+  const misiones = [
+    ['Dominio del Fuego', '🔥 Demuestra tu dominio del fuego en un reto aprobado por un administrador.', 500],
+    ['Maestro de las Aguas', '🌊 Demuestra tu dominio del agua en un reto aprobado por un administrador.', 500],
+    ['Equilibrio del Avatar', '🌊🔥 Demuestra el equilibrio entre los elementos como el Avatar.', 1000]
+  ];
+
+  for (const [tipo, descripcion, puntos] of misiones) {
+    const existente = await db.get(
+      'SELECT id FROM misiones WHERE team_id = ? AND grupo_id = ? AND tipo = ?',
+      [equipo.id, equipo.grupo_id, tipo]
+    );
+    if (!existente) {
+      await db.run(
+        `INSERT INTO misiones (team_id, tipo, descripcion, puntos_recompensa, grupo_id)
+         VALUES (?, ?, ?, ?, ?)`,
+        [equipo.id, tipo, descripcion, puntos, equipo.grupo_id]
+      );
+    }
+  }
+}
+
 export async function obtenerPerfilEquipo(idUsuario) {
   await prepararTablasEquipos();
   return db.get(
@@ -452,28 +484,53 @@ async function ejecutarMisiones(sock, msg, accion, valor, remitente, grupoId) {
     await responder(sock, msg, `✅ Misión ${resultado.lastID} agregada a ${team.nombre_con_emoji}.`);
     return;
   }
-  if (accion === 'lista' && /^\d+$/.test(valor)) {
-    const team = await obtenerEquipo(valor, grupoId);
+  if (accion === 'lista') {
+    const perfil = await obtenerPerfilEquipo(remitente);
+    if (!perfil || perfil.grupo_id !== grupoId) {
+      await responder(sock, msg, 'Primero elige tu equipo con /registrar');
+      return;
+    }
+    const team = /^\d+$/.test(valor)
+      ? await obtenerEquipo(valor, grupoId)
+      : await obtenerEquipo(perfil.team_id, grupoId);
     if (!team) {
       await responder(sock, msg, 'Ese equipo no existe.');
       return;
+    }
+    const avatar = await obtenerEquipoAvatar(grupoId);
+    if (avatar && Number(team.id) === Number(avatar.id) && Number(perfil.team_id) !== Number(avatar.id)) {
+      await responder(sock, msg, 'Esta misión es exclusiva del Team Avatar 🌊🔥');
+      return;
+    }
+    if (avatar && Number(team.id) === Number(avatar.id)) {
+      await asegurarMisionesAvatar(avatar);
     }
     const misiones = await db.all(
       `SELECT id, tipo, descripcion, puntos_recompensa FROM misiones
        WHERE team_id = ? AND grupo_id = ? AND activo = 1 ORDER BY id`,
       [team.id, grupoId]
     );
-    await responder(sock, msg, misiones.length
-      ? `📋 Misiones de ${team.nombre_con_emoji}:\n${misiones.map((mision) =>
-        `#${mision.id} · ${mision.tipo}: ${mision.descripcion} (+${mision.puntos_recompensa} pts)`
-      ).join('\n')}`
+    const renderizar = (mision) =>
+      `#${mision.id} · ${mision.tipo}: ${mision.descripcion} (+${mision.puntos_recompensa} pts)`;
+    const nombresAvatar = new Set(['Dominio del Fuego', 'Maestro de las Aguas', 'Equilibrio del Avatar']);
+    const generales = avatar && Number(team.id) === Number(avatar.id)
+      ? misiones.filter((mision) => !nombresAvatar.has(mision.tipo))
+      : misiones;
+    const exclusivas = avatar && Number(team.id) === Number(avatar.id)
+      ? misiones.filter((mision) => nombresAvatar.has(mision.tipo))
+      : [];
+    const secciones = [];
+    if (generales.length) secciones.push(`Misiones generales de ${team.nombre_con_emoji}:\n${generales.map(renderizar).join('\n')}`);
+    if (exclusivas.length) secciones.push(`Misiones exclusivas del Team Avatar 🌊🔥:\n${exclusivas.map(renderizar).join('\n')}`);
+    await responder(sock, msg, secciones.length
+      ? `📋 ${secciones.join('\n\n')}`
       : `No hay misiones activas para ${team.nombre_con_emoji}.`);
     return;
   }
   if (accion === 'completar' && /^\d+$/.test(valor)) {
     const perfil = await obtenerPerfilEquipo(remitente);
-    if (!perfil) {
-      await responder(sock, msg, 'Necesitas un perfil: /crearperfil');
+    if (!perfil || perfil.grupo_id !== grupoId) {
+      await responder(sock, msg, 'Primero elige tu equipo con /registrar');
       return;
     }
     const mision = await db.get(
@@ -481,6 +538,11 @@ async function ejecutarMisiones(sock, msg, accion, valor, remitente, grupoId) {
        WHERE id = ? AND activo = 1 AND grupo_id = ?`,
       [Number(valor), grupoId]
     );
+    const avatar = await obtenerEquipoAvatar(grupoId);
+    if (mision && avatar && Number(mision.team_id) === Number(avatar.id) && Number(perfil.team_id) !== Number(avatar.id)) {
+      await responder(sock, msg, 'Esta misión es exclusiva del Team Avatar 🌊🔥');
+      return;
+    }
     if (!mision || Number(mision.team_id) !== Number(perfil.team_id)) {
       await responder(sock, msg, 'Esa misión no existe para tu Team.');
       return;
@@ -498,7 +560,9 @@ async function ejecutarMisiones(sock, msg, accion, valor, remitente, grupoId) {
       [mision.id, remitente]
     );
     await registrarPuntosEquipo(remitente, mision.team_id, mision.puntos_recompensa, `Misión ${mision.id}`);
-    await responder(sock, msg, `🎉 Misión completada. Recibiste ${mision.puntos_recompensa} puntos para ti y tu Team.`);
+    await responder(sock, msg, avatar && Number(mision.team_id) === Number(avatar.id)
+      ? `✅ Misión cumplida: ${mision.tipo} — Puntos sumados a Team Avatar 🌊🔥 (+${mision.puntos_recompensa} pts)`
+      : `🎉 Misión completada. Recibiste ${mision.puntos_recompensa} puntos para ti y tu Team.`);
     return;
   }
   await responder(sock, msg, 'Uso: /misiones agregar [team_id] [tipo] [descripción] [puntos] | lista [team_id] | completar [id_mision]');

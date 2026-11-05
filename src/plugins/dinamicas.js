@@ -1,5 +1,5 @@
 import { db } from '../../db.js';
-import { obtenerPerfilEquipo, prepararTablasEquipos } from './equipos.js';
+import { obtenerEquipoAvatar, obtenerPerfilEquipo, prepararTablasEquipos } from './equipos.js';
 import { cargarTodasLasDinamicas } from './dinamicas/index.js';
 import { iniciarDinámicaComun, finalizarDinámica } from './dinamicas/base.js';
 
@@ -19,26 +19,33 @@ async function ejecutar(sock, msg, { command, args = [] }) {
   await prepararTablasEquipos();
   const perfil = await obtenerPerfilEquipo(usuarioId);
   if (!perfil || perfil.grupo_id !== grupoId) {
-    await sock.sendMessage(grupoId, { text: 'Necesitas un perfil: /crearperfil' }, { quoted: msg });
+    await sock.sendMessage(grupoId, { text: 'Primero elige tu equipo con /registrar' }, { quoted: msg });
     return;
   }
   const activas = await db.all(
     'SELECT tipo FROM dinamicas WHERE team_id = ? AND grupo_id = ? AND activo = 1',
     [perfil.team_id, grupoId]
   );
-  if (!activas.length) {
-    await sock.sendMessage(grupoId, { text: `No hay dinámicas activas para ${perfil.nombre_con_emoji}.` }, { quoted: msg });
-    return;
-  }
 
   const dinamicas = await cargarTodasLasDinamicas();
+  const equipoAvatar = await obtenerEquipoAvatar(grupoId);
+  const esAvatar = equipoAvatar && Number(perfil.team_id) === Number(equipoAvatar.id);
   const configuradas = activas
     .map(({ tipo }) => dinamicas.find((item) =>
       item.id.toLowerCase() === String(tipo).toLowerCase() ||
       item.nombre.toLowerCase() === String(tipo).toLowerCase()
     ))
-    .filter(Boolean);
+    .filter((item) => item && (!item.equipoExclusivo || (item.equipoExclusivo === 'avatar' && esAvatar)));
+  if (esAvatar) {
+    for (const dinamica of dinamicas.filter((item) => item.equipoExclusivo === 'avatar')) {
+      if (!configuradas.some((item) => item.id === dinamica.id)) configuradas.push(dinamica);
+    }
+  }
   if (!configuradas.length) {
+    if (!activas.length) {
+      await sock.sendMessage(grupoId, { text: `No hay dinámicas activas para ${perfil.nombre_con_emoji}.` }, { quoted: msg });
+      return;
+    }
     await sock.sendMessage(
       grupoId,
       { text: `Las dinámicas activas de ${perfil.nombre_con_emoji} no coinciden con ningún tipo disponible. Consulta /dinamicas lista ${perfil.team_id}.` },
@@ -54,6 +61,11 @@ async function ejecutar(sock, msg, { command, args = [] }) {
   if (!seleccionada) {
     await sock.sendMessage(grupoId, { text: 'Ese tipo de dinámica no está activo para tu Team.' }, { quoted: msg });
     return;
+  }
+  if (seleccionada.equipoExclusivo === 'avatar') {
+    await sock.sendMessage(grupoId, {
+      text: `🎮 Dinámica del Team Avatar: ${seleccionada.nombre}`
+    }, { quoted: msg });
   }
   await iniciarDinámicaComun(sock, grupoId, seleccionada, perfil.team_id);
 }
