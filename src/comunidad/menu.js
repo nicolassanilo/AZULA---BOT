@@ -97,6 +97,10 @@ ${PIE_MENU}`,
 /sticker cuadrado → Sticker cuadrado
 /sticker eliminar-fondo → Quitar el fondo y crear un sticker
 
+🎵 Audio
+/musica [URL de YouTube] → Enviar audio de contenido propio o con licencia libre
+/musica ayuda → Ver instrucciones y aviso de derechos de autor
+
 💡 También puedes enviar una imagen con /sticker como texto.
 
 ${PIE_MENU}`

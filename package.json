@@ -15,6 +15,7 @@
   },
   "license": "MIT",
   "dependencies": {
+    "@distube/ytdl-core": "4.15.9",
     "@hapi/boom": "^10.0.1",
     "@imgly/background-removal-node": "^1.4.5",
     "@whiskeysockets/baileys": "^6.7.22",

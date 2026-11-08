@@ -1,6 +1,7 @@
 # Build and Release Folders
 bin-debug/
 bin-release/
+[Nn]ode_modules/
 [Oo]bj/
 [Bb]in/
 
