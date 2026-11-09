@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import ytdl from '@distube/ytdl-core';
+import ytdl from 'ytdl-core';
 
 const AVISO_DERECHOS =
   '⚠️ Solo usar con contenido de tu propiedad o con licencia libre, está prohibido descargar música protegida por derechos de autor';
