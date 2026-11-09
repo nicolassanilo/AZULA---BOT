@@ -1,7 +1,6 @@
 /**
  * @file Archivo principal del Bot de WhatsApp HINATA.
- * @description Este archivo maneja la conexión con WhatsApp, carga los plugins de comandos
- * y procesa los mensajes entrantes.
+ * @description Este archivo conecta WhatsApp y procesa los comandos de utilidades.
  * @version 2.0.0
  */
 
@@ -23,19 +22,11 @@ try {
     console.log('⚠️ Módulo qrcode no disponible, QR solo en terminal');
     qrcodeImg = null;
 }
-import path from 'path';
-import fs from 'fs/promises';
-import { Boom } from '@hapi/boom';
 import express from 'express';
-import { initDB, db } from './db.js';
-import { fileURLToPath, pathToFileURL } from 'url';
-import { readJsonFileSafe, writeJsonFileSafe } from './src/comunidad/archivos-seguros.js';
-import { activarBienvenida } from './src/comunidad/bienvenida.js';
-import { activarMisiones } from './src/comunidad/misiones.js';
-import { activarPerfiles } from './src/comunidad/sistema/perfiles.js';
-import { activarRanking } from './src/comunidad/sistema/ranking.js';
-import { activarTiendas } from './src/comunidad/tiendas/index.js';
-import { activarMenu } from './src/comunidad/menu.js';
+import { readJsonFileSafe } from './src/comunidad/archivos-seguros.js';
+import { enviarMenu } from './src/comunidad/menu.js';
+import stickersPlugin from './plugins/stickers.js';
+import musicaPlugin from './plugins/musica.js';
 
 process.on('uncaughtException', (error) => {
     console.warn('⚠️ Error capturado sin detener el bot:', error?.message || error);
@@ -51,12 +42,8 @@ import './config_nagiv3.js';
 // Importa makeWASocket como default
 import makeWASocket from '@whiskeysockets/baileys';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-// Almacén global para los comandos cargados
+// Solo se registran los comandos de stickers y música.
 export let plugins = new Map();
-export let regexPlugins = [];
 // Almacén global para la configuración
 export let config = {};
 
@@ -67,19 +54,6 @@ export function getConfig() {
 export async function refreshConfig() {
     config = await obtenerConfig();
     return config;
-}
-
-export async function reloadPlugins() {
-    const latestConfig = await refreshConfig().catch((error) => {
-        console.error('⚠️ No se pudo recargar la configuración, usando la configuración actual:', error);
-        return config;
-    });
-
-    const result = await cargarPlugins();
-    return {
-        config: latestConfig,
-        ...result
-    };
 }
 
 // Almacén global para el QR actual
@@ -149,138 +123,14 @@ async function obtenerConfig() {
     }
 }
 
-/**
- * Carga dinámicamente todos los comandos desde la carpeta 'plugins'.
- */
-async function collectPluginFiles(directory, collected = []) {
-    try {
-        const entries = await fs.readdir(directory, { withFileTypes: true });
-        for (const entry of entries) {
-            const fullPath = path.join(directory, entry.name);
-            if (entry.isDirectory()) {
-                await collectPluginFiles(fullPath, collected);
-                continue;
-            }
-
-            if (entry.isFile() && entry.name.endsWith('.js') && entry.name !== 'db.js' && !entry.name.startsWith('_')) {
-                collected.push(fullPath);
-            }
-        }
-    } catch (error) {
-        // Ignorar directorios que no existan y seguir con los que sí existan.
-    }
-
-    return collected;
-}
-
 export async function cargarPlugins() {
-    const newPlugins = new Map();
-    const newRegexPlugins = [];
-    const errors = [];
-
-    const pluginRoots = [
-        path.join(__dirname, 'plugins'),
-        path.join(__dirname, 'Plugins'),
-        path.join(__dirname, 'src', 'plugins'),
-        path.join(__dirname, 'comunidad')
-    ];
-
-    try {
-        const discoveredPluginFiles = (await Promise.all(
-            pluginRoots.map(root => collectPluginFiles(root, []))
-        )).flat();
-        const canonicalFiles = await Promise.all(discoveredPluginFiles.map(async (file) => {
-            try {
-                return [await fs.realpath(file), file];
-            } catch (error) {
-                console.warn(`⚠️ No se pudo normalizar la ruta del plugin "${file}":`, error?.message || error);
-                return [path.resolve(file), file];
-            }
-        }));
-        const pluginFiles = [...new Map(canonicalFiles).values()];
-
-        console.log('🔌 Cargando plugins...');
-        for (const pluginFilePath of pluginFiles) {
-            try {
-                const file = path.basename(pluginFilePath);
-                const pluginPath = `${pathToFileURL(pluginFilePath).href}?v=${Date.now()}`;
-                const imported = await import(pluginPath);
-                const pluginDefinition = imported.default || imported;
-                const pluginName = pluginDefinition.nombre || file;
-                if (pluginDefinition.activo === false) {
-                    console.log(`⏸️ Plugin inactivo: ${pluginName}`);
-                    continue;
-                }
-
-                const commands = pluginDefinition.command || pluginDefinition.commands || pluginDefinition.comandos ||
-                    imported.command || imported.commands || imported.comandos;
-                const aliases = pluginDefinition.alias || pluginDefinition.aliases || imported.alias || imported.aliases;
-
-                if (!commands) {
-                    console.log(`⚠️ Plugin omitido: "${file}" no exporta comandos compatibles.`);
-                    continue;
-                }
-
-                const pluginObj = typeof pluginDefinition === 'function'
-                    ? { ...pluginDefinition, run: pluginDefinition, command: pluginDefinition.command }
-                    : { ...pluginDefinition, run: pluginDefinition.run || pluginDefinition.ejecutar || pluginDefinition };
-
-                if (typeof pluginObj.run !== 'function') {
-                    console.log(`⚠️ Plugin omitido: "${file}" no tiene una función run o ejecutar válida.`);
-                    continue;
-                }
-
-                if (typeof pluginObj.inicializar === 'function') {
-                    await pluginObj.inicializar();
-                }
-
-                const commandList = [
-                  ...(Array.isArray(commands) ? commands : [commands]),
-                  ...(aliases ? (Array.isArray(aliases) ? aliases : [aliases]) : [])
-                ];
-                let registeredCommands = 0;
-
-                for (const cmd of commandList) {
-                    if (cmd instanceof RegExp) {
-                        newRegexPlugins.push({ pattern: cmd, plugin: pluginObj, file });
-                        registeredCommands += 1;
-                        continue;
-                    }
-
-                    if (typeof cmd !== 'string') {
-                        console.log(`⚠️ Comando ignorado en "${file}": tipo de comando no soportado.`);
-                        continue;
-                    }
-
-                    const commandKey = cmd.startsWith('.') || cmd.startsWith('/') || cmd.startsWith('!') ? cmd : `.${cmd}`;
-                    if (newPlugins.has(commandKey)) {
-                        console.warn(`⚠️ ¡Comando duplicado! "${cmd}" en "${file}" será omitido.`);
-                        continue;
-                    }
-
-                    newPlugins.set(commandKey, pluginObj);
-                    registeredCommands += 1;
-                }
-
-                if (registeredCommands > 0) {
-                    console.log(`✅ Plugin cargado: ${pluginName}`);
-                } else {
-                    console.warn(`⚠️ Plugin omitido: "${pluginName}" no registró ningún comando.`);
-                }
-            } catch (err) {
-                console.error(`❌ Error al cargar el plugin "${pluginFilePath}":`, err);
-                errors.push({ file: path.basename(pluginFilePath), error: err.message });
-            }
-        }
-
-        plugins = newPlugins;
-        regexPlugins = newRegexPlugins;
-        console.log(`✅ ${plugins.size} comandos cargados, ${regexPlugins.length} patrones regex registrados.`);
-        return { plugins, regexPlugins, errors };
-    } catch (error) {
-        console.error('❌ No se pudo leer el directorio de plugins. Asegúrate de que la carpeta "plugins" existe.', error);
-        return { plugins: new Map(), regexPlugins: [], errors: [{ file: 'directorio de plugins', error: error.message }] };
-    }
+    plugins = new Map([
+        ['/sticker', stickersPlugin],
+        ['/s', stickersPlugin],
+        ['/musica', musicaPlugin]
+    ]);
+    console.log(`✅ Plugins de utilidades cargados: ${plugins.size} comandos.`);
+    return { plugins, errors: [] };
 }
 
 // ----------------------------------------
@@ -299,25 +149,13 @@ async function connectToWhatsApp() {
         reconnectTimer = null;
 
         try {
-            await initDB();
-        } catch (dbError) {
-            console.warn('⚠️ Base de datos no disponible, continuando con el bot:', dbError?.message || dbError);
-        }
-
-        try {
             config = await obtenerConfig();
         } catch (configError) {
             config = { authMethod: 'qr', cooldowns: { perUser: 5, groupBurstLimit: 25, groupBurstSeconds: 60 } };
             console.warn('⚠️ Configuración por defecto aplicada:', configError?.message || configError);
         }
 
-        try {
-            ({ plugins, regexPlugins } = await cargarPlugins());
-        } catch (pluginError) {
-            console.warn('⚠️ Cargando plugins vacíos por error del sistema:', pluginError?.message || pluginError);
-            plugins = new Map();
-            regexPlugins = [];
-        }
+        await cargarPlugins();
 
         if (socketInstance && typeof socketInstance.ws?.close === 'function') {
             try {
@@ -360,13 +198,6 @@ async function connectToWhatsApp() {
         });
 
         socketInstance = sock;
-
-        activarBienvenida(sock);
-        activarMisiones(sock);
-        activarRanking(sock);
-        activarPerfiles(sock);
-        activarMenu(sock, () => plugins);
-        activarTiendas(sock);
 
         sock.ev.on('connection.update', (update) => {
             const { connection, lastDisconnect } = update;
@@ -434,17 +265,7 @@ async function connectToWhatsApp() {
 
             const chatId = msg.key.remoteJid;
             const userId = msg.key.participant || msg.key.remoteJid;
-
-            if (chatId?.endsWith('@g.us')) {
-                try {
-                    await db.run(
-                        'INSERT INTO group_activity (chatId, userId, lastSeen) VALUES (?, ?, CURRENT_TIMESTAMP) ON CONFLICT(chatId, userId) DO UPDATE SET lastSeen = CURRENT_TIMESTAMP',
-                        [chatId, userId]
-                    );
-                } catch (dbErr) {
-                    console.warn('⚠️ Actividad de grupo no guardada:', dbErr?.message || dbErr);
-                }
-            }
+            const senderId = msg.key.remoteJid;
 
             const messageContent = msg.message?.ephemeralMessage?.message ||
                 msg.message?.viewOnceMessage?.message ||
@@ -457,51 +278,18 @@ async function connectToWhatsApp() {
                 '';
             const prefix = '/';
 
-            if (!text.startsWith(prefix)) {
-                const contenido = text.trim();
-                try {
-                    if (/^\d+$/.test(contenido)) {
-                        if (/^[1-4]$/.test(contenido)) {
-                            const triviaPlugin = plugins.get('/trivia') || plugins.get('.trivia');
-                            if (triviaPlugin && triviaPlugin.procesarMensajeTrivia) {
-                                await triviaPlugin.procesarMensajeTrivia(sock, msg);
-                                return;
-                            }
-                        }
-
-                        const adivinaPlugin = plugins.get('/adivina') || plugins.get('.adivina');
-                        if (adivinaPlugin && adivinaPlugin.procesarMensajeNumero) {
-                            await adivinaPlugin.procesarMensajeNumero(sock, msg);
-                            return;
-                        }
-                    }
-
-                    if (contenido.length === 1 && /\p{L}/u.test(contenido)) {
-                        const ahorcadoPlugin = plugins.get('/ahorcado') || plugins.get('.ahorcado');
-                        if (ahorcadoPlugin && ahorcadoPlugin.procesarMensajeAhorcado) {
-                            await ahorcadoPlugin.procesarMensajeAhorcado(sock, msg);
-                            return;
-                        }
-                    }
-                } catch (err) {
-                    console.warn('⚠️ Error procesando mensaje de juego:', err?.message || err);
-                }
-                return;
-            }
-
             if (!text.startsWith(prefix)) return;
 
-            const senderId = msg.key.remoteJid;
             const args = text.slice(prefix.length).trim().split(/ +/);
             const commandName = args.shift()?.toLowerCase() || '';
             const command = prefix + commandName;
 
-            let plugin = plugins.get(command);
-            if (!plugin && regexPlugins.length) {
-                const matched = regexPlugins.find(({ pattern }) => pattern.test(commandName));
-                if (matched) plugin = matched.plugin;
+            if (command === '/menu' || command === '/ayuda') {
+                await enviarMenu(sock, msg, command);
+                return;
             }
 
+            let plugin = plugins.get(command);
             if (!plugin) return;
 
             try {
@@ -538,7 +326,7 @@ async function connectToWhatsApp() {
 
                 if (isOwner) {
                     console.log(`🔓 Usuario propietario detectado (${userId}), saltando cooldowns para ${command}`);
-                    await plugin.run(sock, msg, { text: args.join(' '), command, args, plugins, ownerId });
+                    await plugin.ejecutar(sock, msg, { text: args.join(' '), command, args, plugins, ownerId });
                     return;
                 }
 
@@ -565,7 +353,7 @@ async function connectToWhatsApp() {
                 cooldownsMap.set(cmdKey, now);
 
                 console.log(`💬 Comando: ${command} | Argumentos: [${args.join(', ')}] | De: ${senderId}`);
-                await plugin.run(sock, msg, { text: args.join(' '), command, args, plugins, ownerId });
+                await plugin.ejecutar(sock, msg, { text: args.join(' '), command, args, plugins, ownerId });
             } catch (err) {
                 console.warn(`⚠️ Error ejecutando el comando "${command}":`, err?.message || err);
                 await sock.sendMessage(msg.key.remoteJid, { text: '⚠️ Ocurrió un error inesperado al ejecutar ese comando.' }, { quoted: msg });
@@ -603,6 +391,7 @@ async function connectToWhatsApp() {
 }
 
 // Iniciar el bot
+console.log('Bot en modo solo utilidades: activados stickers + música');
 connectToWhatsApp().catch(err => {
     console.error("❌ Error al iniciar la conexión WhatsApp:", err);
     console.log("🔄 El servidor web seguirá ejecutándose. Reintentando conexión en 30 segundos...");
