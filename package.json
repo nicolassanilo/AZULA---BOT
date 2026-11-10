@@ -22,8 +22,8 @@
     "pino": "^8.17.2",
     "qrcode": "^1.5.4",
     "qrcode-terminal": "^0.12.0",
+    "soundcloud-downloader": "^1.0.0",
     "sqlite": "^5.1.1",
-    "sqlite3": "^5.1.7",
-    "ytdl-core": "^4.11.5"
+    "sqlite3": "^5.1.7"
   }
 }
