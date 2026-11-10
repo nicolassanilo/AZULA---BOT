@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { downloadMediaMessage } from '@whiskeysockets/baileys';
@@ -9,8 +9,11 @@ import sharp from 'sharp';
 const execFileAsync = promisify(execFile);
 const MAX_MEDIA_BYTES = 20 * 1024 * 1024;
 const MAX_STICKER_BYTES = 1024 * 1024;
+const MAX_ANIMATED_STICKER_BYTES = 500 * 1024 - 1;
 
 class FormatoNoSoportadoError extends Error {}
+class GifDemasiadoPesadoError extends Error {}
+class ConversionGifError extends Error {}
 
 function desenvolverMensaje(message) {
   let actual = message;
@@ -38,7 +41,10 @@ function detectarMedia(message) {
 
   if (contenido.videoMessage) {
     const media = contenido.videoMessage;
-    if (media.gifPlayback || /(?:image|video)\/gif/i.test(media.mimetype || '')) {
+    if (
+      media.gifPlayback === true ||
+      /(?:image|video)\/gif/i.test(media.mimetype || '')
+    ) {
       return { tipo: 'gif' };
     }
     return { tipo: 'unsupported' };
@@ -86,41 +92,77 @@ function obtenerDatosMedia(message) {
   return null;
 }
 
-async function descargarMedia(message) {
+async function descargarMedia(message, esGif = false) {
   const buffer = await downloadMediaMessage(message, 'buffer');
   if (!Buffer.isBuffer(buffer) || !buffer.length) {
     throw new FormatoNoSoportadoError('El archivo multimedia está vacío.');
   }
   if (buffer.length > MAX_MEDIA_BYTES) {
+    if (esGif) {
+      throw new GifDemasiadoPesadoError();
+    }
     throw new FormatoNoSoportadoError('La imagen supera el límite de 20 MB.');
   }
   return buffer;
 }
 
-async function extraerFotogramaGif(buffer, mimetype) {
-  const carpetaTemporal = await mkdtemp(path.join(os.tmpdir(), 'azula-sticker-'));
+async function crearStickerAnimado(buffer, mimetype, carpetaTemporal) {
   const extension = /gif/i.test(mimetype || '') ? 'gif' : 'mp4';
   const entrada = path.join(carpetaTemporal, `entrada.${extension}`);
-  const salida = path.join(carpetaTemporal, 'fotograma.png');
+  const salida = path.join(carpetaTemporal, 'sticker-animado.webp');
+  await writeFile(entrada, buffer);
 
-  try {
-    await writeFile(entrada, buffer);
-    await execFileAsync(
-      process.env.FFMPEG_PATH || 'ffmpeg',
-      [
-        '-hide_banner',
-        '-loglevel', 'error',
-        '-y',
-        '-i', entrada,
-        '-frames:v', '1',
-        salida
-      ],
-      { timeout: 30000, maxBuffer: 1024 * 1024 }
-    );
-    return await readFile(salida);
-  } finally {
-    await rm(carpetaTemporal, { recursive: true, force: true });
+  const intentos = [
+    { dimension: 512, calidad: 55 },
+    { dimension: 448, calidad: 45 },
+    { dimension: 384, calidad: 35 },
+    { dimension: 320, calidad: 25 }
+  ];
+
+  for (const intento of intentos) {
+    const filtro =
+      `fps=15,scale=w='min(${intento.dimension},iw)':` +
+      `h='min(${intento.dimension},ih)':force_original_aspect_ratio=decrease:` +
+      'force_divisible_by=2';
+
+    try {
+      await execFileAsync(
+        process.env.FFMPEG_PATH || 'ffmpeg',
+        [
+          '-hide_banner',
+          '-loglevel', 'error',
+          '-y',
+          '-i', entrada,
+          '-an',
+          '-vf', filtro,
+          '-vcodec', 'libwebp',
+          '-pix_fmt', 'yuva420p',
+          '-lossless', '0',
+          '-compression_level', '6',
+          '-q:v', String(intento.calidad),
+          '-loop', '0',
+          salida
+        ],
+        { timeout: 60000, maxBuffer: 1024 * 1024 }
+      );
+    } catch (error) {
+      if (error?.code === 'ENOENT') throw error;
+      throw new ConversionGifError(error?.stderr?.trim() || error.message);
+    }
+
+    let detalles;
+    try {
+      detalles = await stat(salida);
+    } catch (error) {
+      throw new ConversionGifError(`No se generó el archivo WebP animado: ${error.message}`);
+    }
+
+    if (detalles.size > 0 && detalles.size <= MAX_ANIMATED_STICKER_BYTES) {
+      return await readFile(salida);
+    }
   }
+
+  throw new GifDemasiadoPesadoError();
 }
 
 async function quitarFondo(buffer) {
@@ -213,12 +255,13 @@ async function enviarTexto(sock, msg, texto) {
 
 const plugin = {
   nombre: 'Stickers',
-  descripcion: 'Crea stickers desde imágenes y GIFs.',
+  descripcion: 'Crea stickers estáticos desde imágenes y animados desde GIFs.',
   comandos: ['/sticker', '/s'],
   activo: true,
 
   async ejecutar(sock, msg, context = {}) {
     const chatId = msg.key?.remoteJid;
+    let carpetaTemporal;
 
     try {
       if (!chatId) {
@@ -257,13 +300,8 @@ const plugin = {
         return;
       }
 
-      let buffer = await descargarMedia(mensajeMedia);
-      let esGif = mediaDetectada.tipo === 'gif' ||
+      const esGif = mediaDetectada.tipo === 'gif' ||
         /image\/gif/i.test(datosMedia.media.mimetype || '');
-
-      if (esGif && datosMedia.tipo === 'video') {
-        buffer = await extraerFotogramaGif(buffer, datosMedia.media.mimetype);
-      }
 
       const mimetype = datosMedia.media.mimetype || '';
       if (
@@ -274,22 +312,64 @@ const plugin = {
         throw new FormatoNoSoportadoError(`Formato de imagen no soportado: ${mimetype}`);
       }
 
+      if (esGif) {
+        if (estilo !== 'normal') {
+          await enviarTexto(
+            sock,
+            msg,
+            '⚠️ Los estilos círculo, cuadrado y eliminar-fondo solo están disponibles para imágenes estáticas.'
+          );
+          return;
+        }
+
+        await enviarTexto(sock, msg, '⏳ Creando sticker animado...');
+        const buffer = await descargarMedia(mensajeMedia, true);
+        carpetaTemporal = await mkdtemp(path.join(os.tmpdir(), 'azula-sticker-'));
+        const sticker = await crearStickerAnimado(
+          buffer,
+          mimetype,
+          carpetaTemporal
+        );
+        await sock.sendMessage(
+          chatId,
+          { sticker, isAnimated: true },
+          { quoted: msg }
+        );
+        console.log(
+          `✅ Sticker animado creado | chat=${chatId} | bytes=${sticker.length}`
+        );
+        await enviarTexto(sock, msg, '✅ Sticker animado listo!');
+        return;
+      }
+
+      const buffer = await descargarMedia(mensajeMedia);
       const sticker = await procesarImagen(buffer, estilo);
       await sock.sendMessage(chatId, { sticker }, { quoted: msg });
       console.log(
-        `✅ Sticker creado | chat=${chatId} | estilo=${estilo} | gif=${esGif} | bytes=${sticker.length}`
+        `✅ Sticker creado | chat=${chatId} | estilo=${estilo} | bytes=${sticker.length}`
       );
 
-      if (esGif) {
+      await enviarTexto(sock, msg, '✅ Sticker creado');
+    } catch (error) {
+      if (error instanceof GifDemasiadoPesadoError) {
         await enviarTexto(
           sock,
           msg,
-          '✅ Sticker creado\n⚠️ El GIF se convirtió a un sticker estático (primer fotograma).'
+          '⚠️ El GIF es demasiado pesado, intenta con uno más ligero'
         );
-      } else {
-        await enviarTexto(sock, msg, '✅ Sticker creado');
+        return;
       }
-    } catch (error) {
+
+      if (error instanceof ConversionGifError) {
+        console.error(`❌ Error convirtiendo GIF en ${chatId || 'chat desconocido'}:`, error.message);
+        await enviarTexto(
+          sock,
+          msg,
+          '❌ No se pudo convertir el GIF a sticker animado. Verifica que ffmpeg esté instalado y que admita libwebp.'
+        );
+        return;
+      }
+
       if (error instanceof FormatoNoSoportadoError) {
         console.warn(`⚠️ No se pudo crear el sticker en ${chatId || 'chat desconocido'}: ${error.message}`);
         await enviarTexto(sock, msg, `❌ Formato no soportado. ${error.message}`);
@@ -303,8 +383,25 @@ const plugin = {
           ? `❌ ${error.message}`
           : '❌ No se pudo crear el sticker. Revisa los logs del bot e inténtalo de nuevo.';
       await enviarTexto(sock, msg, mensaje);
+    } finally {
+      if (carpetaTemporal) {
+        try {
+          await rm(carpetaTemporal, { recursive: true, force: true });
+        } catch (error) {
+          console.error(
+            `❌ No se pudieron eliminar los archivos temporales del sticker en ${chatId || 'chat desconocido'}:`,
+            error
+          );
+          await enviarTexto(
+            sock,
+            msg,
+            '⚠️ No se pudieron eliminar los archivos temporales del sticker.'
+          );
+        }
+      }
     }
   }
 };
 
 export default plugin;
+export { detectarMedia };
