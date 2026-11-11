@@ -28,6 +28,7 @@ import { enviarMenu } from './src/comunidad/menu.js';
 import stickersPlugin from './plugins/stickers.js';
 import musicaPlugin from './plugins/musica.js';
 import pexelsPlugin from './plugins/pexels.js';
+import animeBuscarPlugin from './plugins/anime-buscar.js';
 
 process.on('uncaughtException', (error) => {
     console.warn('⚠️ Error capturado sin detener el bot:', error?.message || error);
@@ -130,7 +131,9 @@ export async function cargarPlugins() {
         ['/s', stickersPlugin],
         ['/musica', musicaPlugin],
         ['/foto', pexelsPlugin],
-        ['/imagen', pexelsPlugin]
+        ['/imagen', pexelsPlugin],
+        ['/anime-buscar', animeBuscarPlugin],
+        ['/anime-imagen', animeBuscarPlugin]
     ]);
     console.log(`✅ Plugins de utilidades cargados: ${plugins.size} comandos.`);
     return { plugins, errors: [] };

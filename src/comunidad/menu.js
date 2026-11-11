@@ -36,6 +36,10 @@ Usa solo contenido propio o con licencia que permita su descarga.
 📸 IMÁGENES
 /foto [palabra clave] o /imagen [palabra clave] → Buscar una imagen en Pexels.
 
+🎌 ANIME
+/anime-buscar [etiqueta] o /anime-imagen [etiqueta] → Buscar imágenes de anime.
+Usa /anime-buscar sin término para ver ejemplos de etiquetas.
+
 💡 Escribe /menu, /ayuda o /menu-utilidades para volver a ver estas instrucciones.
 
 ${PIE_MENU}`;
