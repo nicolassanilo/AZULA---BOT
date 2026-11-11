@@ -13,7 +13,7 @@ const RUTAS_IMAGEN = [
 ];
 
 const LIMITE_CAPTION = 1024;
-const COMANDOS_MENU = ['/menu', '/ayuda'];
+const COMANDOS_MENU = ['/menu', '/ayuda', '/menu-utilidades'];
 const ENCABEZADO_MENU = `🥷📋 𝐌𝐄𝐍𝐔 𝐃𝐄 𝐔𝐓𝐈𝐋𝐈𝐃𝐀𝐃𝐄𝐒 · 𝓐𝔃𝓾𝓵𝓪 𝓑𝓸𝓽 🎮
 ╭─────────────────────────────────────────────╮
 ╰─────────────────────────────────────────────╯`;
@@ -33,7 +33,10 @@ Usa solo contenido propio o con licencia que permita su descarga.
 
 ⚠️ Respeta los derechos de autor. No descargues ni compartas música protegida sin autorización.
 
-💡 Escribe /menu o /ayuda para volver a ver estas instrucciones.
+📸 IMÁGENES
+/foto [palabra clave] o /imagen [palabra clave] → Buscar una imagen en Pexels.
+
+💡 Escribe /menu, /ayuda o /menu-utilidades para volver a ver estas instrucciones.
 
 ${PIE_MENU}`;
 

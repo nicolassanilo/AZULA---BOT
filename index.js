@@ -27,6 +27,7 @@ import { readJsonFileSafe } from './src/comunidad/archivos-seguros.js';
 import { enviarMenu } from './src/comunidad/menu.js';
 import stickersPlugin from './plugins/stickers.js';
 import musicaPlugin from './plugins/musica.js';
+import pexelsPlugin from './plugins/pexels.js';
 
 process.on('uncaughtException', (error) => {
     console.warn('⚠️ Error capturado sin detener el bot:', error?.message || error);
@@ -127,7 +128,9 @@ export async function cargarPlugins() {
     plugins = new Map([
         ['/sticker', stickersPlugin],
         ['/s', stickersPlugin],
-        ['/musica', musicaPlugin]
+        ['/musica', musicaPlugin],
+        ['/foto', pexelsPlugin],
+        ['/imagen', pexelsPlugin]
     ]);
     console.log(`✅ Plugins de utilidades cargados: ${plugins.size} comandos.`);
     return { plugins, errors: [] };
@@ -284,7 +287,7 @@ async function connectToWhatsApp() {
             const commandName = args.shift()?.toLowerCase() || '';
             const command = prefix + commandName;
 
-            if (command === '/menu' || command === '/ayuda') {
+            if (command === '/menu' || command === '/ayuda' || command === '/menu-utilidades') {
                 await enviarMenu(sock, msg, command);
                 return;
             }
@@ -326,7 +329,7 @@ async function connectToWhatsApp() {
 
                 if (isOwner) {
                     console.log(`🔓 Usuario propietario detectado (${userId}), saltando cooldowns para ${command}`);
-                    await plugin.ejecutar(sock, msg, { text: args.join(' '), command, args, plugins, ownerId });
+                    await plugin.ejecutar(sock, msg, { text: args.join(' '), command, args, plugins, ownerId, config: runtimeConfig });
                     return;
                 }
 
@@ -353,7 +356,7 @@ async function connectToWhatsApp() {
                 cooldownsMap.set(cmdKey, now);
 
                 console.log(`💬 Comando: ${command} | Argumentos: [${args.join(', ')}] | De: ${senderId}`);
-                await plugin.ejecutar(sock, msg, { text: args.join(' '), command, args, plugins, ownerId });
+                await plugin.ejecutar(sock, msg, { text: args.join(' '), command, args, plugins, ownerId, config: runtimeConfig });
             } catch (err) {
                 console.warn(`⚠️ Error ejecutando el comando "${command}":`, err?.message || err);
                 await sock.sendMessage(msg.key.remoteJid, { text: '⚠️ Ocurrió un error inesperado al ejecutar ese comando.' }, { quoted: msg });
