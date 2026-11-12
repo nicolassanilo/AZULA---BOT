@@ -40,6 +40,10 @@ Usa solo contenido propio o con licencia que permita su descarga.
 /anime-buscar [etiqueta] o /anime-imagen [etiqueta] → Buscar imágenes de anime.
 Usa /anime-buscar sin término para ver ejemplos de etiquetas.
 
+🎨 ANIME CON IA
+/imagen-ia [descripción] o /ia [descripción] → Generar una imagen de anime con IA.
+Usa /imagen-ia ayuda para ver ejemplos.
+
 💡 Escribe /menu, /ayuda o /menu-utilidades para volver a ver estas instrucciones.
 
 ${PIE_MENU}`;
