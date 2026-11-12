@@ -1,3 +1,5 @@
+import 'dotenv/config';
+
 /**
  * @file Archivo principal del Bot de WhatsApp HINATA.
  * @description Este archivo conecta WhatsApp y procesa los comandos de utilidades.
@@ -7,6 +9,8 @@
 // ----------------------------------------
 //          IMPORTS Y CONFIGURACIÓN
 // ----------------------------------------
+import dotenv from 'dotenv';
+import { fileURLToPath } from 'node:url';
 import {
     DisconnectReason,
     useMultiFileAuthState,
@@ -30,6 +34,11 @@ import musicaPlugin from './plugins/musica.js';
 import pexelsPlugin from './plugins/pexels.js';
 import animeBuscarPlugin from './plugins/anime-buscar.js';
 import animeIaPlugin from './plugins/anime-ia.js';
+
+const envSrc = dotenv.config({ path: fileURLToPath(new URL('./src/.env', import.meta.url)) });
+if (envSrc.error) {
+    console.error('❌ No se pudo cargar src/.env:', envSrc.error.message);
+}
 
 process.on('uncaughtException', (error) => {
     console.warn('⚠️ Error capturado sin detener el bot:', error?.message || error);

@@ -1,8 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import axios from 'axios';
-import plugin from '../plugins/anime-ia.js';
 import { MENUS_POR_COMANDO } from '../src/comunidad/menu.js';
+
+const apiKeyOriginal = process.env.ANIMEAPI_KEY;
+process.env.ANIMEAPI_KEY = 'test-anime-key';
+const { default: plugin } = await import('../plugins/anime-ia.js?with-test-key');
+if (apiKeyOriginal === undefined) delete process.env.ANIMEAPI_KEY;
+else process.env.ANIMEAPI_KEY = apiKeyOriginal;
 
 function crearContexto() {
   const enviados = [];
@@ -46,9 +51,10 @@ test('/imagen-ia indica cómo configurar la clave si falta la variable de entorn
   const { enviados, sock, msg } = crearContexto();
   const keyOriginal = process.env.ANIMEAPI_KEY;
   delete process.env.ANIMEAPI_KEY;
+  const { default: pluginSinClave } = await import('../plugins/anime-ia.js?without-test-key');
 
   try {
-    await plugin.ejecutar(sock, msg, { text: 'un gato anime' });
+    await pluginSinClave.ejecutar(sock, msg, { text: 'un gato anime' });
   } finally {
     if (keyOriginal === undefined) delete process.env.ANIMEAPI_KEY;
     else process.env.ANIMEAPI_KEY = keyOriginal;

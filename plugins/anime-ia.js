@@ -1,6 +1,7 @@
 import axios from 'axios';
 
 const API_URL = 'https://animeapi.ai/api/generate';
+const ANIMEAPI_KEY = process.env.ANIMEAPI_KEY;
 const MAX_PROMPT_LENGTH = 500;
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 const GENERATION_TIMEOUT_MS = 180000;
@@ -110,7 +111,7 @@ const plugin = {
       return;
     }
 
-    const animeApiKey = String(process.env.ANIMEAPI_KEY || '').trim();
+    const animeApiKey = String(ANIMEAPI_KEY || '').trim();
     if (!animeApiKey) {
       await enviarTexto(sock, msg, '⚠️ Configura ANIMEAPI_KEY como variable de entorno para usar este comando.');
       return;
